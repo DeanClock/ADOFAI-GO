@@ -623,7 +623,388 @@ def test_main_window_update_check_failure_is_readable(tmp_path, monkeypatch):
     assert "403" in window.settings_page.update_status.text()
     assert window.settings_page.update_check_button.isEnabled()
     assert window.settings_page.update_download_button.isHidden()
+    assert window._update_result == {}
     window.close()
+    app.processEvents()
+
+
+def _update_result_with_exe(**overrides):
+    result = {
+        "latest": "v0.18.0",
+        "current": "0.17.20",
+        "has_update": True,
+        "body": "更新说明",
+        "html_url": "https://github.com/DeanClock/ADOFAI-GO/releases",
+        "assets": [
+            {
+                "name": "ADOFAI_GO_v0.18.0.exe",
+                "size": 100,
+                "url": "https://example.com/ADOFAI_GO_v0.18.0.exe",
+                "local": False,
+            },
+            {
+                "name": "ADOFAI_GO_v0.18.0.exe.sha256",
+                "size": 65,
+                "url": "https://example.com/ADOFAI_GO_v0.18.0.exe.sha256",
+                "local": False,
+            },
+        ],
+    }
+    result.update(overrides)
+    return result
+
+
+def test_main_window_update_toast_card_opens_settings_update_section(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window.resize(900, 420)
+    window.show()
+    app.processEvents()
+    result = _update_result_with_exe()
+
+    window._on_update_checked(result)
+
+    assert "点击前往设置页更新" in window.toast.text()
+    opened: list[object] = []
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.QDesktopServices.openUrl",
+        lambda url: opened.append(url),
+    )
+    window._navigate("home")
+    area = window.settings_page._scroll_area
+    area.verticalScrollBar().setValue(0)
+    assert callable(window.toast._card_action)
+    QTest.mouseClick(window.toast, Qt.MouseButton.LeftButton)
+    app.processEvents()
+
+    assert window.stack.currentWidget() is window.settings_page
+    assert window.toast.isHidden()
+    assert "发现新版本 v0.18.0" in window.settings_page.update_status.text()
+    assert not window.settings_page.update_install_button.isHidden()
+    # 「软件更新」卡片已滚进可视区，而不是停在页面顶部。
+    card = window.settings_page.update_card
+    viewport = area.viewport()
+    card_rect = QRect(card.mapTo(viewport, QPoint(0, 0)), card.size())
+    assert card_rect.intersects(viewport.rect())
+    assert area.verticalScrollBar().value() > 0
+    assert opened == []
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_toast_card_has_no_url_dependency(tmp_path, monkeypatch):
+    # 离线演示的 release JSON 没有 html_url，提示牌仍然要能点。
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    opened: list[object] = []
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.QDesktopServices.openUrl",
+        lambda url: opened.append(url),
+    )
+
+    result = _update_result_with_exe()
+    result.pop("html_url")
+    window._on_update_checked(result)
+
+    assert "点击前往设置页更新" in window.toast.text()
+    assert callable(window.toast._card_action)
+    window.toast._card_action()
+    app.processEvents()
+
+    assert window.stack.currentWidget() is window.settings_page
+    assert "发现新版本 v0.18.0" in window.settings_page.update_status.text()
+    assert opened == []
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_toast_click_on_settings_keeps_unsaved_edits(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window.show()
+    app.processEvents()
+    window._navigate("settings")
+    window._on_update_checked(_update_result_with_exe())
+    window.settings_page.profile_input.setText("D:/tmp/not-saved-yet")
+    assert window.settings_page.is_dirty()
+    area = window.settings_page._scroll_area
+    area.verticalScrollBar().setValue(0)
+    opened: list[object] = []
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.QDesktopServices.openUrl",
+        lambda url: opened.append(url),
+    )
+
+    QTest.mouseClick(window.toast, Qt.MouseButton.LeftButton)
+    app.processEvents()
+
+    assert window.stack.currentWidget() is window.settings_page
+    # 已在设置页时不再 load()，未保存的修改不会被冲掉。
+    assert window.settings_page.profile_input.text() == "D:/tmp/not-saved-yet"
+    assert window.settings_page.is_dirty()
+    assert "发现新版本 v0.18.0" in window.settings_page.update_status.text()
+    assert not window.settings_page.update_install_button.isHidden()
+    card = window.settings_page.update_card
+    card_rect = QRect(card.mapTo(area.viewport(), QPoint(0, 0)), card.size())
+    assert card_rect.intersects(area.viewport().rect())
+    assert area.verticalScrollBar().value() > 0
+    assert opened == []
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_toast_keeps_download_progress(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window._on_update_checked(_update_result_with_exe())
+    page = window.settings_page
+    page.set_update_download_started()
+    page.set_update_download_progress(40, 100)
+    before_status = page.update_status.text()
+
+    window.toast._card_action()
+    app.processEvents()
+
+    assert window.stack.currentWidget() is page
+    assert not page.update_progress_panel.isHidden()
+    assert page.update_progress.value() == 40
+    assert page.update_status.text() == before_status
+    assert not page.update_install_button.isEnabled()
+    assert not page.update_check_button.isEnabled()
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_toast_respects_navigation_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window._on_update_checked(_update_result_with_exe())
+    focused: list[bool] = []
+    requested: list[str] = []
+
+    def refuse_navigation(key):
+        requested.append(key)
+        return False
+
+    monkeypatch.setattr(window, "_may_leave_settings", refuse_navigation)
+    monkeypatch.setattr(
+        window.settings_page, "focus_update_section", lambda: focused.append(True)
+    )
+    before_page = window.stack.currentWidget()
+
+    window.toast._card_action()
+    app.processEvents()
+
+    assert requested == ["settings"]
+    assert window.stack.currentWidget() is before_page
+    assert focused == []
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_release_button_still_opens_browser(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    result = _update_result_with_exe()
+    window._on_update_checked(result)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()),
+    )
+
+    window.settings_page.update_download_button.click()
+
+    assert opened == [result["html_url"]]
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_download_flow_and_pending_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window._on_update_checked(_update_result_with_exe())
+    captured = {}
+
+    def fake_start(worker, **kwargs):
+        captured["worker"] = worker
+        captured.update(kwargs)
+
+    monkeypatch.setattr(window, "_start_worker", fake_start)
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.install_target",
+        lambda: tmp_path / "ADOFAI_GO.exe",
+    )
+    window.settings_page.update_install_button.click()
+
+    worker = captured["worker"]
+    assert worker.exe_asset["name"] == "ADOFAI_GO_v0.18.0.exe"
+    assert worker.checksum_asset["name"] == "ADOFAI_GO_v0.18.0.exe.sha256"
+    assert window._update_download_worker is worker
+    assert not window.settings_page.update_progress_panel.isHidden()
+    assert not window.settings_page.update_install_button.isEnabled()
+
+    worker.progress.emit(50, 100)
+    app.processEvents()
+    assert window.settings_page.update_progress.value() == 50
+    assert "50%" in window.settings_page.update_status.text()
+
+    worker.stage.emit("checksum")
+    app.processEvents()
+    assert "SHA256" in window.settings_page.update_status.text()
+
+    payload = {
+        "path": str(tmp_path / "new.exe"),
+        "sha256": "f" * 64,
+        "checksum_verified": True,
+    }
+    captured["on_finished"](payload)
+
+    assert window._pending_update == payload
+    assert "已下载并通过 SHA256 校验" in window.settings_page.update_status.text()
+    assert "退出应用后自动替换" in window.settings_page.update_status.text()
+    assert window.toast.text().startswith("更新包已下载并通过 SHA256 校验")
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_close_without_install_target_skips_helper(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window._pending_update = {"path": str(tmp_path / "new.exe"), "sha256": "a" * 64}
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.install_target", lambda: None
+    )
+    called: list[bool] = []
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.launch_install_helper",
+        lambda *args, **kwargs: called.append(True),
+    )
+
+    window.close()
+    app.processEvents()
+
+    assert called == []
+
+
+def test_main_window_update_download_source_mode_message(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window._on_update_checked(_update_result_with_exe())
+    captured: dict = {}
+    monkeypatch.setattr(
+        window, "_start_worker", lambda worker, **kwargs: captured.update(kwargs)
+    )
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.install_target", lambda: None
+    )
+    window.settings_page.update_install_button.click()
+
+    captured["on_finished"](
+        {"path": str(tmp_path / "new.exe"), "sha256": "f" * 64, "checksum_verified": True}
+    )
+
+    assert "源码运行，不会自动替换" in window.settings_page.update_status.text()
+    assert "源码运行，不会自动替换" in window.toast.text()
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_download_cancel_and_error_states(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window._on_update_checked(_update_result_with_exe())
+    captured: dict = {}
+
+    def fake_start(worker, **kwargs):
+        captured["worker"] = worker
+        captured.update(kwargs)
+
+    monkeypatch.setattr(window, "_start_worker", fake_start)
+    window.settings_page.update_install_button.click()
+    worker = captured["worker"]
+
+    window.settings_page.update_cancel_button.click()
+    assert worker._cancel_event.is_set()
+    assert not window.settings_page.update_cancel_button.isEnabled()
+    captured["on_cancelled"]("下载已取消")
+    assert window.settings_page.update_status.text() == "已取消下载更新"
+    captured["on_thread_finished"]()
+    assert window._update_download_worker is None
+
+    window.settings_page.update_install_button.click()
+    captured["on_failed"]("网络不通，无法下载更新包")
+    assert "更新下载失败" in window.settings_page.update_status.text()
+    assert window.settings_page.update_install_button.isEnabled()
+    captured["on_thread_finished"]()
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_update_download_without_exe_asset_warns(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window._on_update_checked(
+        _update_result_with_exe(
+            assets=[
+                {
+                    "name": "source.zip",
+                    "size": 1,
+                    "url": "https://example.com/source.zip",
+                    "local": False,
+                }
+            ]
+        )
+    )
+    started: list[bool] = []
+    monkeypatch.setattr(
+        window, "_start_worker", lambda *args, **kwargs: started.append(True)
+    )
+
+    window._start_update_download()
+
+    assert started == []
+    assert "没有可下载的 exe 安装包" in window.toast.text()
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_close_launches_pending_update_helper(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    new_file = tmp_path / "new.exe"
+    new_file.write_bytes(b"new build")
+    target = tmp_path / "target.exe"
+    target.write_bytes(b"old build")
+    window._pending_update = {"path": str(new_file), "sha256": "b" * 64}
+    launched: list[tuple] = []
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.install_target", lambda: target
+    )
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.launch_install_helper",
+        lambda *args, **kwargs: launched.append((args, kwargs)),
+    )
+
+    window.close()
+
+    assert launched == [((target, new_file, "b" * 64), {})]
     app.processEvents()
 
 

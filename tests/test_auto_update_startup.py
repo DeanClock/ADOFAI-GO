@@ -105,13 +105,17 @@ def test_startup_check_failure_is_logged_without_ui_or_toast(
 def test_startup_check_notifies_when_update_is_available(tmp_path, monkeypatch):
     app, window = _window(tmp_path, monkeypatch)
     started: dict[str, object] = {}
-    toasts: list[tuple[object, ...]] = []
+    toasts: list[dict[str, object]] = []
+
+    def fake_show(*args, **kwargs):
+        toasts.append({"args": args, "kwargs": kwargs})
+
     monkeypatch.setattr(
         window,
         "_start_worker",
         lambda worker, **callbacks: started.update(callbacks),
     )
-    monkeypatch.setattr(window.toast, "show_message", lambda *args: toasts.append(args))
+    monkeypatch.setattr(window.toast, "show_message", fake_show)
 
     window._check_update(REPO, silent=True)
     started["on_finished"](
@@ -128,7 +132,30 @@ def test_startup_check_notifies_when_update_is_available(tmp_path, monkeypatch):
     assert window.settings_page.update_notes.text() == "测试版更新说明"
     assert not window.settings_page.update_download_button.isHidden()
     assert len(toasts) == 1
-    assert "v0.18.0" in toasts[0][0]
+    assert "v0.18.0" in toasts[0]["args"][0]
+    assert "点击前往设置页更新" in toasts[0]["args"][0]
+    # 整卡点击切到设置页的「软件更新」卡片，不再打开浏览器。
+    opened: list[object] = []
+    monkeypatch.setattr(
+        "adofai_publisher.ui.main_window.QDesktopServices.openUrl",
+        lambda url: opened.append(url),
+    )
+    focused: list[bool] = []
+    monkeypatch.setattr(
+        window.settings_page,
+        "focus_update_section",
+        lambda: focused.append(True),
+    )
+    window._navigate("home")
+    card_action = toasts[0]["kwargs"]["card_action"]
+    assert callable(card_action)
+    card_action()
+    app.processEvents()
+
+    assert window.stack.currentWidget() is window.settings_page
+    assert focused == [True]
+    assert opened == []
+    assert "发现新版本 v0.18.0" in window.settings_page.update_status.text()
     window.close()
     app.processEvents()
 

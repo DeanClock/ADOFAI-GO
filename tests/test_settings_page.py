@@ -226,3 +226,160 @@ def test_leave_settings_dialog_offers_three_choices(tmp_path, monkeypatch):
     assert window.stack.currentWidget() is window.settings_page
     window.close()
     _app().processEvents()
+
+
+UPDATE_ASSETS = [
+    {
+        "name": "ADOFAI_GO_v0.18.0.exe",
+        "size": 100,
+        "url": "https://example.com/ADOFAI_GO_v0.18.0.exe",
+        "local": False,
+    },
+    {
+        "name": "ADOFAI_GO_v0.18.0.exe.sha256",
+        "size": 65,
+        "url": "https://example.com/ADOFAI_GO_v0.18.0.exe.sha256",
+        "local": False,
+    },
+]
+
+
+def _update_result(**overrides):
+    result = {
+        "latest": "v0.18.0",
+        "current": "0.17.20",
+        "has_update": True,
+        "body": "更新说明",
+        "html_url": "https://github.com/DeanClock/ADOFAI-GO/releases",
+        "assets": list(UPDATE_ASSETS),
+    }
+    result.update(overrides)
+    return result
+
+
+def test_settings_update_install_button_requires_exe_asset(tmp_path):
+    app = _app()
+    page = _page(tmp_path)
+    requested: list[bool] = []
+    page.updateInstallRequested.connect(lambda: requested.append(True))
+
+    page.show_update_result(_update_result())
+
+    assert not page.update_install_button.isHidden()
+    assert page.update_install_button.isEnabled()
+    assert page.update_install_button.text() == "下载并安装更新"
+    page.update_install_button.click()
+    assert requested == [True]
+
+    page.show_update_result(
+        _update_result(
+            assets=[
+                {
+                    "name": "source.zip",
+                    "size": 1,
+                    "url": "https://example.com/source.zip",
+                    "local": False,
+                }
+            ]
+        )
+    )
+    assert page.update_install_button.isHidden()
+    assert "没有 exe 安装包" in page.update_status.text()
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_settings_update_download_progress_cancel_and_restore(tmp_path):
+    app = _app()
+    page = _page(tmp_path)
+    page.show_update_result(_update_result())
+    cancelled: list[bool] = []
+    page.updateCancelRequested.connect(lambda: cancelled.append(True))
+
+    page.set_update_download_started()
+    assert not page.update_progress_panel.isHidden()
+    assert not page.update_install_button.isEnabled()
+    assert page.update_install_button.text() == "下载中…"
+    assert not page.update_check_button.isEnabled()
+    assert not page.update_repo_input.isEnabled()
+
+    page.set_update_download_progress(50, 100)
+    assert page.update_progress.value() == 50
+    assert "50%" in page.update_status.text()
+    page.set_update_download_progress(2 * 1024 * 1024, 0)
+    assert "MB" in page.update_status.text()
+
+    page.set_update_download_stage("checksum")
+    assert "SHA256" in page.update_status.text()
+
+    page.update_cancel_button.click()
+    assert cancelled == [True]
+    assert not page.update_cancel_button.isEnabled()
+
+    page.set_update_download_cancelled()
+    assert page.update_progress_panel.isHidden()
+    assert page.update_install_button.isEnabled()
+    assert page.update_install_button.text() == "下载并安装更新"
+    assert page.update_check_button.isEnabled()
+    assert page.update_status.text() == "已取消下载更新"
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_settings_update_download_finished_states(tmp_path):
+    app = _app()
+    page = _page(tmp_path)
+    page.show_update_result(_update_result())
+
+    page.set_update_download_finished({"checksum_verified": True})
+    assert page.update_progress.value() == 100
+    assert page.update_progress_panel.isHidden()
+    assert not page.update_install_button.isEnabled()
+    assert page.update_install_button.text() == "已下载"
+    assert page.update_check_button.isEnabled()
+    assert "SHA256" in page.update_status.text()
+    assert "退出应用后自动替换" in page.update_status.text()
+
+    page.show_update_result(_update_result())
+    page.set_update_download_finished({"checksum_verified": False})
+    assert "未提供 SHA256" in page.update_status.text()
+    assert page.update_status.property("tone") == "warn"
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_settings_update_download_error_restores_buttons(tmp_path):
+    app = _app()
+    page = _page(tmp_path)
+    page.show_update_result(_update_result())
+    page.set_update_download_started()
+
+    page.set_update_download_error("网络不通，无法下载更新包")
+
+    assert page.update_progress_panel.isHidden()
+    assert page.update_install_button.isEnabled()
+    assert page.update_check_button.isEnabled()
+    assert page.update_repo_input.isEnabled()
+    assert "更新下载失败" in page.update_status.text()
+    assert page.update_status.property("tone") == "bad"
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_settings_update_no_update_hides_install_and_progress(tmp_path):
+    app = _app()
+    page = _page(tmp_path)
+    page.show_update_result(_update_result())
+    page.set_update_download_started()
+
+    page.show_update_result(
+        {"latest": "v0.17.20", "current": "0.17.20", "has_update": False}
+    )
+
+    assert page.update_install_button.isHidden()
+    assert page.update_download_button.isHidden()
+    assert page.update_progress_panel.isHidden()
+    assert page.update_check_button.isEnabled()
+    assert "未发现新版本" in page.update_status.text()
+    page.deleteLater()
+    app.processEvents()

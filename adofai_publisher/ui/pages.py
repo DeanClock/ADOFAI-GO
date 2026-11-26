@@ -44,6 +44,7 @@ from ..copy_snippets import (
     insert_snippet,
     normalize_copy_snippets,
 )
+from ..download_tasks import format_bytes
 from ..models import (
     JUDGEMENT_FIELDS,
     Draft,
@@ -51,6 +52,7 @@ from ..models import (
     judgement_hit_count,
     judgement_sum,
 )
+from ..self_update import pick_exe_asset
 from ..tuf_review import (
     REVIEW_CHIP_OBJECTS,
     normalize_review_status,
@@ -2010,6 +2012,8 @@ class SettingsPage(QWidget):
     obsOpenFolderRequested = Signal(str)
     updateCheckRequested = Signal(str)
     updateOpenRequested = Signal(str)
+    updateInstallRequested = Signal()
+    updateCancelRequested = Signal()
     diagnosticsRequested = Signal()
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
@@ -2297,7 +2301,8 @@ class SettingsPage(QWidget):
 
         self.update_card = Card(
             "软件更新",
-            "只检查 GitHub Release 并打开下载页，不会自动下载或替换程序。",
+            "检查 GitHub Release；可下载并校验更新包，退出应用后自动替换程序。"
+            "登录状态与设置保存在程序文件外，更新不会影响它们。",
         )
         version_row = QHBoxLayout()
         version_row.addWidget(_label("当前版本", "Muted"))
@@ -2327,11 +2332,35 @@ class SettingsPage(QWidget):
         )
         self.update_notes.hide()
         self.update_card.body.addWidget(self.update_notes)
-        self.update_download_button = QPushButton("打开下载页")
+        update_actions = QHBoxLayout()
+        update_actions.addStretch(1)
+        self.update_download_button = QPushButton("打开发布页")
         self.update_download_button.setObjectName("GhostButton")
         self.update_download_button.hide()
         self.update_download_button.clicked.connect(self._on_update_open)
-        self.update_card.body.addWidget(self.update_download_button)
+        update_actions.addWidget(self.update_download_button)
+        self.update_install_button = QPushButton("下载并安装更新")
+        self.update_install_button.setObjectName("PrimaryButton")
+        self.update_install_button.hide()
+        self.update_install_button.clicked.connect(self._on_update_install)
+        update_actions.addWidget(self.update_install_button)
+        self.update_card.body.addLayout(update_actions)
+        self.update_progress_panel = QWidget()
+        progress_row = QHBoxLayout(self.update_progress_panel)
+        progress_row.setContentsMargins(0, 0, 0, 0)
+        progress_row.setSpacing(8)
+        self.update_progress = QProgressBar()
+        self.update_progress.setObjectName("DownloadBar")
+        self.update_progress.setRange(0, 100)
+        self.update_progress.setValue(0)
+        self.update_progress.setTextVisible(True)
+        self.update_cancel_button = QPushButton("取消下载")
+        self.update_cancel_button.setObjectName("GhostButton")
+        self.update_cancel_button.clicked.connect(self._on_update_cancel)
+        progress_row.addWidget(self.update_progress, 1)
+        progress_row.addWidget(self.update_cancel_button)
+        self.update_progress_panel.hide()
+        self.update_card.body.addWidget(self.update_progress_panel)
         outer.addWidget(self.update_card)
 
         about_card = Card("关于", "本地运行，不上传任何第三方服务器。")
@@ -2393,6 +2422,8 @@ class SettingsPage(QWidget):
         self.update_repo_input.setText(str(self.settings.get("update_repo") or ""))
         self.update_notes.hide()
         self.update_download_button.hide()
+        self.update_install_button.hide()
+        self._reset_update_download_ui()
         if not str(self.settings.get("update_repo") or "").strip():
             self.set_update_status("未配置更新仓库", None)
         else:
@@ -2601,6 +2632,10 @@ class SettingsPage(QWidget):
         self._scroll_area.ensureWidgetVisible(self.obs_card, 0, 12)
         self.obs_password_input.setFocus()
 
+    def focus_update_section(self) -> None:
+        """把「软件更新」卡片滚到可见。"""
+        self._scroll_area.ensureWidgetVisible(self.update_card, 0, 12)
+
     def set_sav_result(self, message: str, ok: bool | None) -> None:
         tone = "ok" if ok else ("warn" if ok is None else "bad")
         self.sav_status.setText(message)
@@ -2669,6 +2704,14 @@ class SettingsPage(QWidget):
         if url:
             self.updateOpenRequested.emit(url)
 
+    def _on_update_install(self) -> None:
+        self.updateInstallRequested.emit()
+
+    def _on_update_cancel(self) -> None:
+        self.update_cancel_button.setEnabled(False)
+        self.set_update_status("正在取消下载…", None)
+        self.updateCancelRequested.emit()
+
     def set_update_busy(self, busy: bool) -> None:
         self.update_check_button.setEnabled(not busy)
         self.update_check_button.setText("检查中…" if busy else "检查更新")
@@ -2685,11 +2728,92 @@ class SettingsPage(QWidget):
         level = getattr(self, "_update_status_level", None)
         self.set_update_status(self.update_status.text(), level)
 
+    # -- 应用内下载更新 -----------------------------------------------------
+
+    def _reset_update_download_ui(self) -> None:
+        """下载结束/取消/失败后，把进度区恢复成可再次下载的状态。"""
+        self.update_progress_panel.hide()
+        self.update_progress.setValue(0)
+        self.update_cancel_button.setEnabled(True)
+        self.update_install_button.setEnabled(True)
+        self.update_install_button.setText("下载并安装更新")
+        self.set_update_busy(False)
+
+    def set_update_download_started(self) -> None:
+        self.update_install_button.setEnabled(False)
+        self.update_install_button.setText("下载中…")
+        self.update_check_button.setEnabled(False)
+        self.update_repo_input.setEnabled(False)
+        self.update_progress.setValue(0)
+        self.update_progress_panel.show()
+        self.update_cancel_button.setEnabled(True)
+        self.set_update_status("正在下载更新包…", None)
+
+    def set_update_download_progress(self, received: int, total: int) -> None:
+        received = max(0, int(received or 0))
+        total = max(0, int(total or 0))
+        if total > 0:
+            percent = max(0, min(100, round(received * 100 / total)))
+            self.update_progress.setValue(percent)
+            self.set_update_status(
+                f"正在下载更新包：{percent}%"
+                f"（{format_bytes(received)} / {format_bytes(total)}）",
+                None,
+            )
+        else:
+            self.set_update_status(
+                f"正在下载更新包：{format_bytes(received)}", None
+            )
+
+    def set_update_download_stage(self, stage: str) -> None:
+        if stage == "checksum":
+            self.set_update_status("正在校验 SHA256…", None)
+
+    def set_update_download_cancelling(self) -> None:
+        self.update_cancel_button.setEnabled(False)
+        self.set_update_status("正在取消下载…", None)
+
+    def set_update_download_finished(
+        self, result: dict[str, Any], *, auto_install: bool = True
+    ) -> None:
+        verified = bool(result.get("checksum_verified"))
+        self.update_progress.setValue(100)
+        self.update_progress_panel.hide()
+        self.update_cancel_button.setEnabled(True)
+        self.update_install_button.setEnabled(False)
+        self.update_install_button.setText("已下载")
+        self.set_update_busy(False)
+        if verified:
+            message = "更新包已下载并通过 SHA256 校验"
+        else:
+            message = "更新包已下载（发布未提供 SHA256 校验文件，已跳过校验）"
+        if auto_install:
+            message += "，退出应用后自动替换"
+        else:
+            message += "；当前是源码运行，不会自动替换"
+        self.set_update_status(
+            message, "ok" if verified and auto_install else "warn"
+        )
+
+    def set_update_download_error(self, message: str) -> None:
+        self._reset_update_download_ui()
+        self.set_update_status(f"更新下载失败：{message}", "bad")
+
+    def set_update_download_cancelled(self) -> None:
+        self._reset_update_download_ui()
+        self.set_update_status("已取消下载更新", None)
+
     def show_update_result(self, result: dict[str, Any]) -> None:
         latest = str(result.get("latest") or "")
         current = str(result.get("current") or __version__)
+        self._reset_update_download_ui()
         if result.get("has_update"):
-            self.set_update_status(f"发现新版本 {latest}（当前 v{current}）", "warn")
+            assets = result.get("assets") or []
+            exe_asset = pick_exe_asset(assets)
+            message = f"发现新版本 {latest}（当前 v{current}）"
+            if exe_asset is None:
+                message += "；该版本没有 exe 安装包，请打开发布页手动下载"
+            self.set_update_status(message, "warn")
             body = " ".join(str(result.get("body") or "").split())
             if len(body) > 320:
                 body = body[:320].rstrip() + "…"
@@ -2699,6 +2823,7 @@ class SettingsPage(QWidget):
                 "url", str(result.get("html_url") or "")
             )
             self.update_download_button.show()
+            self.update_install_button.setVisible(exe_asset is not None)
         else:
             self.set_update_status(
                 f"未发现新版本（当前 v{current}，最新 Release {latest}）",
@@ -2706,11 +2831,14 @@ class SettingsPage(QWidget):
             )
             self.update_notes.hide()
             self.update_download_button.hide()
+            self.update_install_button.hide()
 
     def set_update_error(self, message: str) -> None:
-        self.set_update_status(message, "bad")
         self.update_notes.hide()
         self.update_download_button.hide()
+        self.update_install_button.hide()
+        self._reset_update_download_ui()
+        self.set_update_status(message, "bad")
 
 
 class LevelProfileDialog(QDialog):

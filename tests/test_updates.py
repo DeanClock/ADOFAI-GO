@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 import requests
@@ -169,3 +170,83 @@ def test_check_for_update_missing_tag(monkeypatch):
 
     with pytest.raises(UpdateError, match="tag_name"):
         check_for_update("DeanColck/ADOFAI-GO", "0.13.0")
+
+
+def test_local_release_file_bypasses_network_and_marks_local_assets(
+    tmp_path, monkeypatch
+):
+    exe = tmp_path / "ADOFAI_GO_v9.9.9.exe"
+    exe.write_bytes(b"payload")
+    checksum = tmp_path / "ADOFAI_GO_v9.9.9.exe.sha256"
+    checksum.write_text("a" * 64, encoding="utf-8")
+    release = tmp_path / "release.json"
+    release.write_text(
+        json.dumps(
+            {
+                "tag_name": "v9.9.9",
+                "body": "离线验收",
+                "html_url": "https://github.com/DeanClock/ADOFAI-GO/releases",
+                "assets": [
+                    {
+                        "name": exe.name,
+                        "size": exe.stat().st_size,
+                        "browser_download_url": exe.name,
+                    },
+                    {
+                        "name": checksum.name,
+                        "size": checksum.stat().st_size,
+                        "browser_download_url": checksum.name,
+                    },
+                    {
+                        "name": "remote.exe",
+                        "size": 1,
+                        "browser_download_url": "https://example.com/remote.exe",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ADOFAI_UPDATE_RELEASE_FILE", str(release))
+    called: list[bool] = []
+    monkeypatch.setattr("requests.get", lambda *a, **k: called.append(True))
+
+    result = check_for_update("DeanClock/ADOFAI-GO", "0.17.20")
+
+    assert called == []
+    assert result["has_update"] is True
+    assets = {asset["name"]: asset for asset in result["assets"]}
+    assert assets[exe.name]["local"] is True
+    assert assets[exe.name]["url"] == str(exe.resolve())
+    assert assets[checksum.name]["local"] is True
+    assert assets["remote.exe"]["local"] is False
+    assert assets["remote.exe"]["url"] == "https://example.com/remote.exe"
+
+
+def test_local_release_file_missing_reports_error(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "ADOFAI_UPDATE_RELEASE_FILE", str(tmp_path / "missing.json")
+    )
+
+    with pytest.raises(UpdateError, match="读取失败"):
+        check_for_update("DeanClock/ADOFAI-GO", "0.17.20")
+
+
+def test_local_release_file_invalid_json_reports_error(tmp_path, monkeypatch):
+    release = tmp_path / "release.json"
+    release.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setenv("ADOFAI_UPDATE_RELEASE_FILE", str(release))
+
+    with pytest.raises(UpdateError, match="JSON"):
+        check_for_update("DeanClock/ADOFAI-GO", "0.17.20")
+
+
+def test_local_release_file_ignored_in_frozen_build(tmp_path, monkeypatch):
+    from adofai_publisher.updates import _load_release_override
+
+    release = tmp_path / "release.json"
+    release.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("ADOFAI_UPDATE_RELEASE_FILE", str(release))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert _load_release_override() is None

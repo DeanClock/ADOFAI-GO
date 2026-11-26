@@ -80,6 +80,11 @@ from .umm import (
     uninstall_umm,
 )
 from .updates import UpdateError, check_for_update
+from .self_update import (
+    SelfUpdateCancelled,
+    SelfUpdateError,
+    download_release_update,
+)
 from .wizard_state import now_text
 
 
@@ -131,6 +136,53 @@ class UpdateCheckWorker(QObject):
             self.failed.emit(str(exc))
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
+class UpdateDownloadWorker(QObject):
+    """下载 Release 安装包并校验 SHA256；取消时清理未完成的临时文件。"""
+
+    progress = Signal(int, int)
+    stage = Signal(str)
+    finished = Signal(dict)
+    failed = Signal(str)
+    cancelled = Signal(str)
+
+    def __init__(
+        self,
+        exe_asset: dict[str, Any],
+        checksum_asset: dict[str, Any] | None = None,
+        dest_dir: str | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        super().__init__()
+        self.exe_asset = dict(exe_asset or {})
+        self.checksum_asset = dict(checksum_asset) if checksum_asset else None
+        self.dest_dir = dest_dir
+        self._cancel_event = cancel_event or threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    def run(self) -> None:
+        try:
+            result = download_release_update(
+                self.exe_asset,
+                self.checksum_asset,
+                dest_dir=self.dest_dir,
+                progress=self._progress,
+                cancel_event=self._cancel_event,
+                on_stage=self.stage.emit,
+            )
+            self.finished.emit(result)
+        except SelfUpdateCancelled as exc:
+            self.cancelled.emit(str(exc) or "下载已取消")
+        except SelfUpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+    def _progress(self, received: int, total: int) -> None:
+        self.progress.emit(int(received), int(total))
 
 
 class LevelLookupWorker(QObject):

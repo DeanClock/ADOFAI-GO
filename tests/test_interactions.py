@@ -723,6 +723,93 @@ def test_toast_action_button_stays_clickable(app, host):
     assert toast.isHidden()
 
 
+def test_toast_card_click_runs_action_and_dismisses(app, host):
+    toast = Toast(host)
+    clicked: list[str] = []
+    toast.show_message(
+        "发现新版本 v0.18.0，点击前往设置页更新",
+        "warn",
+        duration=60000,
+        card_action=lambda: clicked.append("settings"),
+    )
+
+    assert toast.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    QTest.mouseClick(toast, Qt.MouseButton.LeftButton)
+
+    assert clicked == ["settings"]
+    assert toast.isHidden()
+
+
+def test_toast_without_card_action_ignores_clicks(app, host):
+    toast = Toast(host)
+    toast.show_message("plain", "info", duration=60000)
+
+    assert toast.cursor().shape() == Qt.CursorShape.ArrowCursor
+    QTest.mouseClick(toast, Qt.MouseButton.LeftButton)
+
+    assert toast.isVisible()
+    toast.dismiss()
+
+
+def test_toast_card_click_does_not_hijack_action_button(app, host):
+    toast = Toast(host)
+    button_clicks: list[bool] = []
+    card_clicks: list[bool] = []
+    toast.show_message(
+        "both",
+        "info",
+        duration=60000,
+        action_text="打开",
+        action=lambda: button_clicks.append(True),
+        card_action=lambda: card_clicks.append(True),
+    )
+
+    toast.action_button.click()
+
+    assert button_clicks == [True]
+    assert card_clicks == []
+
+
+def test_toast_queue_entries_keep_their_own_card_action(app, host):
+    toast = Toast(host)
+    calls: list[str] = []
+    toast.show_message(
+        "first",
+        "info",
+        duration=60000,
+        card_action=lambda: calls.append("first"),
+    )
+    toast.show_message(
+        "second",
+        "info",
+        duration=60000,
+        card_action=lambda: calls.append("second"),
+    )
+
+    assert toast.text() == "first"
+    assert toast.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    toast.dismiss()
+    assert toast.text() == "second"
+    QTest.mouseClick(toast, Qt.MouseButton.LeftButton)
+
+    assert calls == ["second"]
+
+
+def test_toast_cursor_resets_when_next_entry_has_no_card_action(app, host):
+    toast = Toast(host)
+    toast.show_message(
+        "with action", "info", duration=60000, card_action=lambda: None
+    )
+    toast.show_message("plain", "info", duration=60000)
+    assert toast.cursor().shape() == Qt.CursorShape.PointingHandCursor
+
+    toast.dismiss()
+
+    assert toast.text() == "plain"
+    assert toast.cursor().shape() == Qt.CursorShape.ArrowCursor
+    toast.dismiss()
+
+
 def test_toast_repositions_on_parent_resize(app, host):
     toast = Toast(host)
     toast.show_message("pos", "info", duration=60000)

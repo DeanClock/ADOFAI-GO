@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import sys
+from pathlib import Path
 from typing import Any
 
 import requests
+
+from .self_update import RELEASE_FILE_ENV, release_asset_local_path
 
 GITHUB_API = "https://api.github.com"
 USER_AGENT = "ADOFAI-GO-Update-Checker"
@@ -92,21 +98,58 @@ def _release_url(repo: str, payload: dict[str, Any]) -> str:
     return f"https://github.com/{repo}/releases"
 
 
-def _normalize_assets(payload: Any) -> list[dict[str, Any]]:
+def _normalize_assets(
+    payload: Any,
+    *,
+    local_base: Path | None = None,
+) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         return []
     assets: list[dict[str, Any]] = []
     for item in payload:
         if not isinstance(item, dict):
             continue
+        raw_url = str(item.get("browser_download_url") or "")
+        local = False
+        if local_base is not None and raw_url:
+            local_path = release_asset_local_path(local_base, raw_url)
+            if local_path is not None:
+                raw_url = str(local_path)
+                local = True
         assets.append(
             {
                 "name": str(item.get("name") or ""),
                 "size": int(item.get("size") or 0),
-                "url": str(item.get("browser_download_url") or ""),
+                "url": raw_url,
+                "local": local,
             }
         )
     return assets
+
+
+def _load_release_override() -> tuple[dict[str, Any], Path] | None:
+    """本地验收开关：``ADOFAI_UPDATE_RELEASE_FILE`` 指向一份 Release JSON。
+
+    只在显式设置环境变量时生效，且打包版一律忽略——正式更新只走 GitHub，
+    不会因为环境变量去读本地文件。离线验收靠它，配合 ``tools/update_demo.py``。
+    """
+    if getattr(sys, "frozen", False):
+        return None
+    raw = os.environ.get(RELEASE_FILE_ENV, "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise UpdateError(f"本地测试更新文件读取失败：{path}") from exc
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
+        raise UpdateError(f"本地测试更新文件不是有效 JSON：{path}") from exc
+    if not isinstance(payload, dict):
+        raise UpdateError("本地测试更新文件格式不正确：顶层应为对象")
+    return payload, path
 
 
 def check_for_update(
@@ -116,36 +159,42 @@ def check_for_update(
     timeout: float = 10.0,
 ) -> dict[str, Any]:
     normalized = normalize_repo(repo)
-    url = f"{GITHUB_API}/repos/{normalized}/releases/latest"
-    try:
-        response = requests.get(
-            url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "User-Agent": USER_AGENT,
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            timeout=timeout,
-        )
-    except requests.Timeout as exc:
-        raise UpdateError("网络请求超时，请检查网络后重试") from exc
-    except requests.RequestException as exc:
-        message = str(exc).splitlines()[0][:160]
-        raise UpdateError(f"网络不通，无法连接 GitHub：{message}") from exc
+    override = _load_release_override()
+    local_base: Path | None = None
+    if override is not None:
+        payload, release_file = override
+        local_base = release_file.parent
+    else:
+        url = f"{GITHUB_API}/repos/{normalized}/releases/latest"
+        try:
+            response = requests.get(
+                url,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": USER_AGENT,
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                timeout=timeout,
+            )
+        except requests.Timeout as exc:
+            raise UpdateError("网络请求超时，请检查网络后重试") from exc
+        except requests.RequestException as exc:
+            message = str(exc).splitlines()[0][:160]
+            raise UpdateError(f"网络不通，无法连接 GitHub：{message}") from exc
 
-    if response.status_code == 403:
-        raise UpdateError("GitHub 限流（403），请稍后再试")
-    if response.status_code == 404:
-        raise UpdateError("仓库不存在或没有可用的 Release（404），请检查 owner/repo")
-    if response.status_code != 200:
-        raise UpdateError(f"GitHub 返回 HTTP {response.status_code}")
+        if response.status_code == 403:
+            raise UpdateError("GitHub 限流（403），请稍后再试")
+        if response.status_code == 404:
+            raise UpdateError("仓库不存在或没有可用的 Release（404），请检查 owner/repo")
+        if response.status_code != 200:
+            raise UpdateError(f"GitHub 返回 HTTP {response.status_code}")
 
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise UpdateError("更新信息解析失败：GitHub 返回的不是有效 JSON") from exc
-    if not isinstance(payload, dict):
-        raise UpdateError("更新信息解析失败：响应格式不正确")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise UpdateError("更新信息解析失败：GitHub 返回的不是有效 JSON") from exc
+        if not isinstance(payload, dict):
+            raise UpdateError("更新信息解析失败：响应格式不正确")
 
     tag = str(payload.get("tag_name") or "").strip()
     if not tag:
@@ -162,5 +211,5 @@ def check_for_update(
         "has_update": newer,
         "body": str(payload.get("body") or ""),
         "html_url": _release_url(normalized, payload),
-        "assets": _normalize_assets(payload.get("assets")),
+        "assets": _normalize_assets(payload.get("assets"), local_base=local_base),
     }

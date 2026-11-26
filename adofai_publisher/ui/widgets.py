@@ -1134,6 +1134,7 @@ class Toast(QLabel):
         self.action_button.hide()
         self.action_button.clicked.connect(self._run_action)
         self._action: Callable[[], None] | None = None
+        self._card_action: Callable[[], None] | None = None
         self._queue: deque[dict] = deque(maxlen=self.MAX_QUEUE)
         self._current: dict | None = None
         self._effect: QGraphicsOpacityEffect | None = None
@@ -1156,6 +1157,8 @@ class Toast(QLabel):
         duration: int = 3200,
         action_text: str = "",
         action: Callable[[], None] | None = None,
+        *,
+        card_action: Callable[[], None] | None = None,
     ) -> None:
         entry = {
             "text": _prepare_toast_text(text),
@@ -1163,6 +1166,8 @@ class Toast(QLabel):
             "duration": max(400, int(duration or 3200)),
             "action_text": action_text or "",
             "action": action,
+            # 整卡点击（例如「发现新版本」→ 打开发布页）；不影响内嵌按钮。
+            "card_action": card_action,
         }
         if self._current is not None and not self.isVisible():
             # 窗口被外部关闭时清掉残留状态，避免新消息卡在队列里。
@@ -1173,6 +1178,10 @@ class Toast(QLabel):
         if self._current is not None:
             if entry["text"] == self._current["text"]:
                 # 同一条消息重复出现时只重置倒计时，不重复排队。
+                if card_action is not None:
+                    self._current["card_action"] = card_action
+                    self._card_action = card_action
+                    self._update_cursor()
                 self.timer.start(entry["duration"])
                 return
             if entry["level"] == "error":
@@ -1222,6 +1231,8 @@ class Toast(QLabel):
         repolish(self)
         self.setText(entry["text"])
         self._action = entry["action"]
+        self._card_action = entry.get("card_action")
+        self._update_cursor()
         self.action_button.setText(entry["action_text"] or "打开文件夹")
         self.action_button.setVisible(entry["action"] is not None)
         self.setContentsMargins(
@@ -1244,6 +1255,25 @@ class Toast(QLabel):
         if animated:
             self._animate(0.0, 1.0, self.FADE_IN_MS)
         self.timer.start(entry["duration"])
+
+    def _update_cursor(self) -> None:
+        if self._card_action is not None:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.unsetCursor()
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        # 内嵌按钮会先拿到自己的点击事件，这里只处理落在卡片空白处的左键。
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._card_action is not None
+        ):
+            action = self._card_action
+            self.dismiss()
+            action()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def _place_action_button(self) -> None:
         self.action_button.show()
@@ -1321,6 +1351,8 @@ class Toast(QLabel):
         self._current = None
         self.action_button.hide()
         self._action = None
+        self._card_action = None
+        self.unsetCursor()
         self._self_hiding = True
         try:
             self.hide()
@@ -1379,10 +1411,19 @@ class ToastManager:
         duration: int = 3200,
         action_text: str = "",
         action: Callable[[], None] | None = None,
+        *,
+        card_action: Callable[[], None] | None = None,
     ) -> Toast | None:
         toast = cls.instance().toast_for(anchor_widget)
         if toast is not None:
-            toast.show_message(text, level, duration, action_text, action)
+            toast.show_message(
+                text,
+                level,
+                duration,
+                action_text,
+                action,
+                card_action=card_action,
+            )
         return toast
 
 

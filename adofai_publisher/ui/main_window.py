@@ -83,6 +83,12 @@ from ..obs_launcher import (
 from ..obs_ws import ObsClient
 from ..resources import icon_path
 from ..sav import check_strict
+from ..self_update import (
+    find_checksum_asset,
+    install_target,
+    launch_install_helper,
+    pick_exe_asset,
+)
 from ..submission_status import is_tuf_submitted, next_status_after_bvid
 from ..tuf_submitter import (
     DEFAULT_ADOFIA_VERSION,
@@ -120,6 +126,7 @@ from ..workers import (
     UmmActionWorker,
     UmmUpdateWorker,
     UpdateCheckWorker,
+    UpdateDownloadWorker,
 )
 from .batch_bind import BatchBindDialog
 from .chart_library import (
@@ -226,6 +233,11 @@ class MainWindow(QMainWindow):
         self._umm_action_worker: UmmActionWorker | None = None
         self._umm_action = ""
         self._update_check_worker: UpdateCheckWorker | None = None
+        self._update_download_worker: UpdateDownloadWorker | None = None
+        # 最近一次检查结果（下载安装包时要用其中的 assets）。
+        self._update_result: dict[str, Any] = {}
+        # 已下载并校验、等待退出后替换的更新包。
+        self._pending_update: dict[str, Any] | None = None
         self._tools_login_worker: AdofaiToolsLoginWorker | None = None
         self._obs = ObsClient(self)
         self._obs_launch_timer = QTimer(self)
@@ -543,6 +555,8 @@ class MainWindow(QMainWindow):
         self.settings_page.obsOpenFolderRequested.connect(self._open_folder)
         self.settings_page.updateCheckRequested.connect(self._check_update)
         self.settings_page.updateOpenRequested.connect(self._open_update_page)
+        self.settings_page.updateInstallRequested.connect(self._start_update_download)
+        self.settings_page.updateCancelRequested.connect(self._cancel_update_download)
 
         self._obs.test_succeeded.connect(self._on_obs_test_ok)
         self._obs.record_started.connect(self._on_obs_record_started)
@@ -636,7 +650,7 @@ class MainWindow(QMainWindow):
             "按钮四态、表单、卡片、Chip、Issue、步骤条、Toast 与状态行。"
         )
 
-    def _navigate(self, key: str) -> None:
+    def _navigate(self, key: str, *, reload_settings: bool = True) -> None:
         if not self._may_leave_settings(key):
             return
         if key != "workspace":
@@ -661,7 +675,7 @@ class MainWindow(QMainWindow):
             self._ensure_online_browse()
         elif key == "history":
             self._refresh_history()
-        elif key == "settings":
+        elif key == "settings" and reload_settings:
             self.settings_page.load()
         elif key == "umm":
             self.umm.refresh()
@@ -3346,6 +3360,11 @@ class MainWindow(QMainWindow):
     def _check_update(self, repo: str, *, silent: bool = False) -> None:
         if self._update_check_worker is not None:
             return
+        if self._update_download_worker is not None:
+            # 下载安装包期间不并发检查，避免刷新界面把进度区冲掉。
+            if not silent:
+                self.toast.show_message("更新包正在下载中，请稍候", "warn")
+            return
         try:
             repo = normalize_repo(repo)
         except UpdateError as exc:
@@ -3389,11 +3408,21 @@ class MainWindow(QMainWindow):
     ) -> None:
         self.settings_page.set_update_busy(False)
         self.settings_page.show_update_result(result)
+        self._update_result = dict(result)
         if result.get("has_update"):
+            # 整卡点击只切到设置页的「软件更新」卡片，不依赖 html_url：
+            # 离线演示的 release JSON 没有发布页地址，同样要能点。
+            latest = str(result.get("latest") or "").strip()
+            hint = (
+                f"发现新版本 {latest}，点击前往设置页更新"
+                if latest
+                else "发现新版本，点击前往设置页更新"
+            )
             self.toast.show_message(
-                f"发现新版本 {result.get('latest')}，可打开下载页",
+                hint,
                 "warn",
                 5000,
+                card_action=self._goto_update_section,
             )
         elif not silent:
             self.toast.show_message("当前已是最新版本", "ok")
@@ -3402,6 +3431,7 @@ class MainWindow(QMainWindow):
         self._handle_update_check_failed(message, silent=False)
 
     def _handle_update_check_failed(self, message: str, *, silent: bool) -> None:
+        self._update_result = {}
         if silent:
             logging.getLogger("adofai").info("启动时检查更新失败：%s", message)
             return
@@ -3412,11 +3442,134 @@ class MainWindow(QMainWindow):
     def _on_update_check_finished(self) -> None:
         self._update_check_worker = None
 
+    def _goto_update_section(self) -> None:
+        """定位软件更新，保留检查结果、下载进度及未保存的设置。"""
+        if self.stack.currentWidget() is not self.settings_page:
+            # _navigate 仍检查 _may_leave_settings；此入口不重新 load()，
+            # 否则会隐藏刚查到的更新按钮，或清掉正在显示的下载进度。
+            self._navigate("settings", reload_settings=False)
+        if self.stack.currentWidget() is not self.settings_page:
+            return
+        # 首次切页要等布局完成后再定位滚动区域。
+        QTimer.singleShot(0, self.settings_page.focus_update_section)
+
     def _open_update_page(self, url: str) -> None:
         if not url.startswith(("https://", "http://")):
             self.toast.show_message("下载页地址无效", "error")
             return
         QDesktopServices.openUrl(QUrl(url))
+
+    # -- 应用内下载并替换更新 ---------------------------------------------
+
+    def _start_update_download(self) -> None:
+        """用户点「下载并安装更新」后才开始下载，绝不静默进行。"""
+        if self._update_download_worker is not None:
+            self.toast.show_message("更新包正在下载中，请稍候", "warn")
+            return
+        # 用户在下载新包，之前的待替换状态作废；失败就重新下载。
+        self._pending_update = None
+        self._startup_update_timer.stop()
+        result = self._update_result or {}
+        assets = result.get("assets")
+        if not isinstance(assets, list):
+            assets = []
+        exe_asset = pick_exe_asset(assets)
+        if exe_asset is None:
+            self.toast.show_message(
+                "这个版本没有可下载的 exe 安装包，请打开发布页手动更新",
+                "warn",
+                6000,
+            )
+            return
+        checksum_asset = find_checksum_asset(assets, exe_asset)
+        worker = UpdateDownloadWorker(exe_asset, checksum_asset)
+        self._update_download_worker = worker
+        worker.progress.connect(
+            lambda received, total: _post_to_ui_thread(
+                self, self.settings_page.set_update_download_progress, received, total
+            )
+        )
+        worker.stage.connect(
+            lambda stage: _post_to_ui_thread(
+                self, self.settings_page.set_update_download_stage, stage
+            )
+        )
+        self.settings_page.set_update_download_started()
+        self._start_worker(
+            worker,
+            on_finished=self._on_update_download_finished,
+            on_failed=self._on_update_download_failed,
+            on_cancelled=self._on_update_download_cancelled,
+            on_thread_finished=self._on_update_download_worker_finished,
+        )
+
+    def _cancel_update_download(self) -> None:
+        worker = self._update_download_worker
+        if worker is None:
+            return
+        self.settings_page.set_update_download_cancelling()
+        worker.cancel()
+
+    def _on_update_download_finished(self, result: dict[str, Any]) -> None:
+        if getattr(self, "_closing", False):
+            return
+        payload = dict(result or {})
+        self._pending_update = payload
+        auto_install = install_target() is not None
+        self.settings_page.set_update_download_finished(
+            payload, auto_install=auto_install
+        )
+        verified = (
+            "并通过 SHA256 校验"
+            if payload.get("checksum_verified")
+            else "（发布未提供 SHA256 校验文件）"
+        )
+        if auto_install:
+            message = f"更新包已下载{verified}，退出应用后自动替换"
+        else:
+            message = (
+                f"更新包已下载{verified}；当前是源码运行，不会自动替换"
+                "（打包版会在退出后自动替换）"
+            )
+        level = "ok" if payload.get("checksum_verified") and auto_install else "warn"
+        self.toast.show_message(message, level, 7000)
+
+    def _on_update_download_failed(self, message: str) -> None:
+        if getattr(self, "_closing", False):
+            return
+        self.settings_page.set_update_download_error(message)
+        self.toast.show_message(f"更新下载失败：{message}", "error", 7000)
+
+    def _on_update_download_cancelled(self, _message: str) -> None:
+        if getattr(self, "_closing", False):
+            return
+        self.settings_page.set_update_download_cancelled()
+        self.toast.show_message("已取消下载更新", "info")
+
+    def _on_update_download_worker_finished(self) -> None:
+        self._update_download_worker = None
+
+    def _launch_pending_update_install(self) -> None:
+        """退出流程最后一步：把替换交给独立 helper，失败只记日志。"""
+        pending = self._pending_update
+        if not pending:
+            return
+        target = install_target()
+        if target is None:
+            logging.getLogger("adofai").info(
+                "更新包已下载，但当前不是打包版且未指定安装目标，跳过自动替换"
+            )
+            return
+        new_file = Path(str(pending.get("path") or ""))
+        sha256 = str(pending.get("sha256") or "")
+        try:
+            script = launch_install_helper(target, new_file, sha256)
+        except Exception:
+            logging.getLogger("adofai").exception("无法启动更新替换脚本")
+            return
+        logging.getLogger("adofai").info(
+            "退出后更新替换脚本已启动：%s（目标：%s）", script, target
+        )
 
     def _login_adofaitools(self) -> None:
         if self._tools_login_worker is not None:
@@ -3724,4 +3877,6 @@ class MainWindow(QMainWindow):
             self._persist_draft()
         self._startup_update_timer.stop()
         self._save_window_state()
+        # 只有确认要退出（上面的询问没有取消）才启动替换 helper。
+        self._launch_pending_update_install()
         super().closeEvent(event)
