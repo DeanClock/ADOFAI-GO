@@ -1,0 +1,11 @@
+{
+  "Id": "ADOFAIGOBridge",
+  "DisplayName": "ADOFAI GO Bridge",
+  "Author": "",
+  "Version": "0.2.1",
+  "AssemblyName": "ADOFAIGOBridge.dll",
+  "EntryMethod": "ADOFAIGOBridge.Main.Load",
+  "ManagerVersion": "0.0.0",
+  "GameVersion": "",
+  "Description": "ADOFAI GO 桌面端专用桥接：接收载入谱面请求并调用游戏编辑器打开。"
+}

@@ -1,0 +1,42 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+build/
+build_*/
+dist/
+dist_*/
+*.spec.bak
+*.pkg
+*.exe
+
+# Local tool data / login profiles
+settings.json
+records.json
+draft.json
+browser_profile/
+logs/
+*.log
+*.tmp
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Editor / OS
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+
+# Local screenshots
+.screenshots/
+
+# Local verification artifacts
+artifacts/
