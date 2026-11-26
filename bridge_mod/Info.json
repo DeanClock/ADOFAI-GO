@@ -1,7 +1,7 @@
 {
   "Id": "ADOFAIGOBridge",
   "DisplayName": "ADOFAI GO Bridge",
-  "Author": "",
+  "Author": "DeanClock",
   "Version": "0.2.1",
   "AssemblyName": "ADOFAIGOBridge.dll",
   "EntryMethod": "ADOFAIGOBridge.Main.Load",

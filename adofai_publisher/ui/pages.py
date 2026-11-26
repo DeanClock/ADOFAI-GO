@@ -2342,7 +2342,7 @@ class SettingsPage(QWidget):
         about_card.body.addLayout(about_version_row)
         about_author_row = QHBoxLayout()
         about_author_row.addWidget(_label("作者", "Muted"))
-        about_author_row.addWidget(_label("DeanClock & ", "Value"))
+        about_author_row.addWidget(_label("DeanClock", "Value"))
         about_author_row.addStretch(1)
         about_card.body.addLayout(about_author_row)
         outer.addWidget(about_card)

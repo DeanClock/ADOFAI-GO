@@ -4298,7 +4298,7 @@ def test_settings_about_author_shows_author(tmp_path):
 
     page = SettingsPage(Settings(tmp_path / "settings.json"))
     texts = [label.text() for label in page.findChildren(QLabel)]
-    assert "DeanClock & " in texts
+    assert "DeanClock" in texts
     page.close()
     page.deleteLater()
     app.processEvents()
