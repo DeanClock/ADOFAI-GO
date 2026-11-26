@@ -26,7 +26,6 @@ MODS_DIR_NAME = "Mods"
 # 创意工坊不可用；steam:// 协议在 Steam 未运行时会自动启动客户端并排队启动。
 STEAM_APP_ID = "977950"
 STEAM_RUN_GAME_URL = f"steam://rungameid/{STEAM_APP_ID}"
-REFERENCE_INSTALLER_DIR = r"C:\Users\DeanClock\DeskBox\文件\box\Tools\UnityModManagerInstaller"
 
 UMM_REPOSITORY_URL = (
     "https://raw.githubusercontent.com/newman55/unity-mod-manager/master/"
@@ -360,8 +359,8 @@ def umm_installer_source(settings: Settings | None = None) -> Path | None:
     """定位 UMM 安装器目录。
 
     优先级：设置里的 ``umm_installer_dir`` → 工具数据目录下的
-    ``UnityModManagerInstaller`` → 旧版参考目录（仅当它确实存在时作为兼容回退）。
-    目录都不存在时返回 None。
+    ``UnityModManagerInstaller``。目录都不存在时返回 None。
+    不读取任何硬编码的本机路径。
     """
     candidates: list[Path] = []
     if settings is not None:
@@ -369,9 +368,6 @@ def umm_installer_source(settings: Settings | None = None) -> Path | None:
         if configured:
             candidates.append(Path(configured))
     candidates.append(installer_dir())
-    reference = Path(REFERENCE_INSTALLER_DIR)
-    if reference.is_dir():
-        candidates.append(reference)
     for candidate in candidates:
         if candidate.is_dir():
             return candidate
@@ -2220,6 +2216,32 @@ def install_mod(settings: Settings, mod_id: str, archive_path: str | None = None
     return result
 
 
+def _safe_mod_dir(mods_dir: Path, mod_id: str) -> Path:
+    """校验模组 ID 并返回 Mods 下的目录路径；非法 ID 统一抛 UmmError。
+
+    中文等 Unicode 目录名是合法模组 ID（AdofaiTools 的 display_name 回退可能
+    是中文），这里只拒绝真正危险的名字：空串、``.``/``..``、绝对路径、路径
+    分隔符、盘符冒号、NUL/控制字符，以及 resolve 后逃出 Mods 目录的名字。
+    resolve 会展开符号链接，指向 Mods 外部的目录同样被拒绝。
+    """
+    name = str(mod_id if mod_id is not None else "")
+    if not name.strip():
+        raise UmmError("模组 ID 非法：不能为空")
+    if name in (".", ".."):
+        raise UmmError(f"模组 ID 非法：{name!r}")
+    if any(char in name for char in ("/", "\\", ":")):
+        raise UmmError(f"模组 ID 非法：{name!r}")
+    if any(ord(char) < 32 or ord(char) == 127 for char in name):
+        raise UmmError(f"模组 ID 非法：{name!r}")
+    if Path(name).is_absolute() or Path(name).anchor:
+        raise UmmError(f"模组 ID 非法：{name!r}")
+    mods_root = Path(mods_dir).resolve()
+    target = (mods_root / name).resolve()
+    if target == mods_root or not target.is_relative_to(mods_root):
+        raise UmmError(f"模组 ID 非法：{name!r}")
+    return Path(mods_dir) / name
+
+
 def install_mod_archive(
     settings: Settings,
     mod_id: str,
@@ -2234,11 +2256,11 @@ def install_mod_archive(
     if not source_path.is_file():
         raise UmmError(f"找不到模组压缩包：{source_path}")
     mods_dir = _mods_dir(settings)
-    mods_dir.mkdir(parents=True, exist_ok=True)
-    target = mods_dir / mod_id
+    target = _safe_mod_dir(mods_dir, mod_id)
     existing = resolve_mod_dir(settings, mod_id)
     if existing is not None:
         raise UmmError(f"模组 {mod_id} 已安装，请先卸载再重新安装")
+    mods_dir.mkdir(parents=True, exist_ok=True)
     try:
         _extract_zip_safe(source_path, target)
     except (OSError, zipfile.BadZipFile) as exc:
@@ -2248,7 +2270,12 @@ def install_mod_archive(
     info = _read_info_json(target)
     real_id = str(info.get("Id") or "").strip()
     if real_id and real_id != mod_id and target.is_dir():
-        desired = mods_dir / real_id
+        try:
+            desired = _safe_mod_dir(mods_dir, real_id)
+        except UmmError:
+            # 压缩包里的 Id 也会被拼进路径；校验失败时不能留下半装目录。
+            shutil.rmtree(target, ignore_errors=True)
+            raise
         if not desired.exists():
             try:
                 target.rename(desired)
@@ -2279,11 +2306,14 @@ def install_mod_archive(
 
 
 def resolve_mod_dir(settings: Settings, mod_id: str) -> Path | None:
-    """按 Info.json 的 Id 定位真实目录，目录名可能与 Id 不一致。"""
+    """按 Info.json 的 Id 定位真实目录，目录名可能与 Id 不一致。
+
+    mod_id 先经过 ``_safe_mod_dir`` 校验，穿越型 ID 直接抛 UmmError。
+    """
     mods_dir = _mods_dir(settings)
+    direct = _safe_mod_dir(mods_dir, mod_id)
     if not mods_dir.is_dir():
         return None
-    direct = mods_dir / mod_id
     if direct.is_dir() and str(_read_info_json(direct).get("Id") or mod_id) == mod_id:
         return direct
     for child in sorted(mods_dir.iterdir(), key=lambda p: p.name.lower()):
@@ -2299,9 +2329,16 @@ def resolve_mod_dir(settings: Settings, mod_id: str) -> Path | None:
 
 
 def uninstall_mod(settings: Settings, mod_id: str) -> None:
+    mods_dir = _mods_dir(settings)
+    _safe_mod_dir(mods_dir, mod_id)  # 穿越型 ID 在删除前就拒绝
     target = resolve_mod_dir(settings, mod_id)
     if target is None:
         raise UmmError(f"没有找到模组 {mod_id} 的安装目录，可能已经卸载")
+    # 删除前按 resolve 后的真实路径再确认一次，防止符号链接逃出 Mods。
+    mods_root = mods_dir.resolve()
+    resolved = target.resolve()
+    if resolved == mods_root or not resolved.is_relative_to(mods_root):
+        raise UmmError(f"模组 {mod_id} 的安装目录不在 Mods 内，拒绝删除：{target}")
     real_id = _mod_id_from_folder(target)
     try:
         shutil.rmtree(target)

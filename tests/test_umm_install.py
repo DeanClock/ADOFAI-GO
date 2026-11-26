@@ -124,14 +124,6 @@ def _installer_dir(tmp_path: Path) -> Path:
     return _populate_installer(tmp_path / "installer")
 
 
-def _isolate_reference(monkeypatch, tmp_path: Path) -> None:
-    """把旧参考目录指到不存在的位置，避免命中本机真实安装器。"""
-    monkeypatch.setattr(
-        "adofai_publisher.umm.REFERENCE_INSTALLER_DIR",
-        str(tmp_path / "missing-reference-installer"),
-    )
-
-
 def _settings(tmp_path: Path, game: Path) -> Settings:
     settings = Settings(tmp_path / "settings.json")
     settings.set("umm_game_dir", str(game))
@@ -706,7 +698,6 @@ def test_uninstall_umm_removes_injection_and_keeps_managed_files(environment):
 def test_install_umm_auto_downloads_missing_installer(tmp_path, monkeypatch):
     """新机器没有安装器时，一键安装应先自动下载再继续安装。"""
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     settings = _settings(tmp_path, game)
     settings.set("umm_mirror", "gh-proxy.com")
@@ -747,7 +738,6 @@ def test_install_umm_auto_downloads_missing_installer(tmp_path, monkeypatch):
 def test_install_umm_falls_back_to_thunderstore(tmp_path, monkeypatch):
     """官方源（Dropbox）失败后自动改用 Thunderstore，并继续完成安装。"""
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     settings = _settings(tmp_path, game)
 
@@ -790,7 +780,6 @@ def test_install_umm_thunderstore_cancel_does_not_install(tmp_path, monkeypatch)
     from adofai_publisher.umm import UmmCancelled
 
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     settings = _settings(tmp_path, game)
 
@@ -814,7 +803,6 @@ def test_install_umm_thunderstore_cancel_does_not_install(tmp_path, monkeypatch)
 
 def test_install_umm_auto_download_failure_is_readable(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     settings = _settings(tmp_path, game)
 
@@ -846,7 +834,6 @@ def test_install_umm_auto_download_failure_is_readable(tmp_path, monkeypatch):
 
 def test_install_umm_skips_download_when_installer_exists(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     _populate_installer(installer_dir())
     settings = _settings(tmp_path, game)
@@ -869,7 +856,6 @@ def test_install_umm_auto_download_cancel_does_not_install(tmp_path, monkeypatch
     from adofai_publisher.umm import UmmCancelled
 
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     settings = _settings(tmp_path, game)
 
@@ -888,7 +874,6 @@ def test_install_umm_auto_download_cancel_does_not_install(tmp_path, monkeypatch
 def test_install_umm_redownloads_incomplete_managed_installer(tmp_path, monkeypatch):
     """数据目录里的安装器被清空（只剩目录）时，也应按缺失处理并重新下载。"""
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     installer_dir().mkdir(parents=True)
     settings = _settings(tmp_path, game)
@@ -913,7 +898,6 @@ def test_umm_installer_needs_download_semantics(tmp_path, monkeypatch):
     )
 
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     settings = _settings(tmp_path, _game_dir(tmp_path))
 
     # 没有安装器：需要下载。
@@ -936,7 +920,6 @@ def test_umm_installer_needs_download_semantics(tmp_path, monkeypatch):
 
 def test_install_umm_reports_when_download_creates_no_installer(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     game = _game_dir(tmp_path)
     settings = _settings(tmp_path, game)
 

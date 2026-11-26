@@ -10,7 +10,6 @@ import pytest
 from adofai_publisher.config import Settings
 from adofai_publisher.umm import (
     MODS_DIR_NAME,
-    REFERENCE_INSTALLER_DIR,
     STEAM_APP_ID,
     STEAM_RUN_GAME_URL,
     UMM_SOURCE_FILES,
@@ -408,17 +407,8 @@ def test_launch_game_spawns_directly_without_steam(tmp_path, monkeypatch):
     assert spawned == [(str(exe), str(game))]
 
 
-def _isolate_reference(monkeypatch, tmp_path: Path) -> None:
-    """把旧版参考目录指到不存在的位置，避免本机真实目录干扰测试。"""
-    monkeypatch.setattr(
-        "adofai_publisher.umm.REFERENCE_INSTALLER_DIR",
-        str(tmp_path / "no-reference"),
-    )
-
-
 def test_installer_source_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     fallback = tmp_path / "UnityModManagerInstaller"
     fallback.mkdir(parents=True)
     (fallback / "UnityModManager.exe").write_bytes(b"")
@@ -427,7 +417,6 @@ def test_installer_source_fallback(tmp_path, monkeypatch):
 
 def test_installer_source_prefers_configured_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     configured = tmp_path / "custom-installer"
     configured.mkdir()
     fallback = tmp_path / "UnityModManagerInstaller"
@@ -440,7 +429,6 @@ def test_installer_source_prefers_configured_dir(tmp_path, monkeypatch):
 
 def test_installer_source_skips_missing_configured_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     fallback = tmp_path / "UnityModManagerInstaller"
     fallback.mkdir(parents=True)
     settings = Settings(tmp_path / "settings.json")
@@ -451,7 +439,6 @@ def test_installer_source_skips_missing_configured_dir(tmp_path, monkeypatch):
 
 def test_installer_source_ignores_configured_file(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     configured = tmp_path / "installer.txt"
     configured.write_bytes(b"")
     fallback = tmp_path / "UnityModManagerInstaller"
@@ -462,31 +449,17 @@ def test_installer_source_ignores_configured_file(tmp_path, monkeypatch):
     assert umm_installer_source(settings) == fallback
 
 
-def test_installer_source_ignores_missing_reference(tmp_path, monkeypatch):
+def test_installer_source_returns_none_without_installer(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    _isolate_reference(monkeypatch, tmp_path)
     settings = Settings(tmp_path / "settings.json")
 
     assert umm_installer_source() is None
     assert umm_installer_source(settings) is None
 
 
-def test_installer_source_uses_reference_only_when_present(tmp_path, monkeypatch):
-    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
-    reference = tmp_path / "legacy-reference"
-    reference.mkdir()
-    monkeypatch.setattr(
-        "adofai_publisher.umm.REFERENCE_INSTALLER_DIR", str(reference)
-    )
-
-    assert umm_installer_source() == reference
-    assert umm_installer_source(Settings(tmp_path / "settings.json")) == reference
-
-
 def test_install_umm_and_list_mods_use_configured_installer_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
     game, installer, settings = _make_environment(tmp_path)
-    _isolate_reference(monkeypatch, tmp_path)
     settings.set("umm_installer_dir", str(installer))
     settings.save()
 
@@ -631,7 +604,6 @@ def test_set_mod_enabled_refuses_corrupt_params(tmp_path, monkeypatch):
 def test_list_mods_reads_enabled_state_from_params(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
     game, _installer, settings = _make_environment(tmp_path)
-    _isolate_reference(monkeypatch, tmp_path)
     _install_mod_folder(game, "AdofaiTweaks", "1.0.0")
     _write_params(
         game,
@@ -649,7 +621,6 @@ def test_list_mods_reads_enabled_state_from_params(tmp_path, monkeypatch):
 def test_legacy_disabled_folder_uses_params_and_renames_back(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
     game, _installer, settings = _make_environment(tmp_path)
-    _isolate_reference(monkeypatch, tmp_path)
     legacy = game / MODS_DIR_NAME / "AdofaiTweaks.disabled"
     legacy.mkdir(parents=True)
     (legacy / "Info.json").write_text(json.dumps({"Id": "AdofaiTweaks"}), encoding="utf-8")
@@ -669,7 +640,6 @@ def test_legacy_disabled_folder_uses_params_and_renames_back(tmp_path, monkeypat
 def test_legacy_disabled_folder_reads_params_state(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
     game, _installer, settings = _make_environment(tmp_path)
-    _isolate_reference(monkeypatch, tmp_path)
     legacy = game / MODS_DIR_NAME / "AdofaiTweaks.disabled"
     legacy.mkdir(parents=True)
     (legacy / "Info.json").write_text(json.dumps({"Id": "AdofaiTweaks"}), encoding="utf-8")

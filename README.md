@@ -117,8 +117,8 @@ python run.py --page umm
   「下载失败」，同时列出两个源各自的原因和手动兜底方式。
   「卸载 UMM」会一起清掉这三样注入文件，只删除 `Managed\UnityModManager` 这一层，
   不影响 Mods、`Managed` 下其它文件与游戏本体。
-- 安装器来源默认读取参考目录（开发者本机的 UMM 安装器目录），
-  也可以把整套安装器放到工具数据目录 `%APPDATA%\AdofaiTufBridge\UnityModManagerInstaller`。
+- 安装器来源优先读取设置里的自定义安装器目录，默认是工具数据目录
+  `%APPDATA%\AdofaiTufBridge\UnityModManagerInstaller`。
   两处都没有（或数据目录里的安装器被清空）时，「一键安装 UMM」会自动下载安装包补齐，
   用户自己指定的完整安装器目录不会被替换。
 - 「在线更新 UMM」会从 UMM 官方更新仓库（`newman55/unity-mod-manager` 的
