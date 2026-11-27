@@ -558,6 +558,10 @@ class CoverPicker(QFrame):
     4:3 的图，通过 ``sync_callback`` / ``syncImageChanged`` 交给页面；
     ``save_sync`` 负责把它落到缓存目录。组件本身不读写草稿字段，接线由页面负责。
     副槽也可以单独指定图片。
+
+    预览「点一个是一个」：每个槽只显示自己的图片，副槽为空时不再拿主图的裁剪版
+    顶替——那只是投稿时的兜底——这样一眼能看出副槽到底传没传。预览框按较高的
+    4:3 撑开，16:9 与 4:3 的图都完整显示，不做居中裁剪。
     """
 
     fileSelected = Signal(str)
@@ -573,12 +577,19 @@ class CoverPicker(QFrame):
         SLOT_PRIMARY: "JPG / PNG / WEBP · 16:9 主图，B 站会按 16:10 裁切",
         SLOT_ALTERNATE: "JPG / PNG / WEBP · 4:3 副图",
     }
+    # 有自己文件的槽在按钮文字后打勾，切换时一眼分清谁传了、谁没传。
+    SLOT_DONE_MARK = "  ✓"
+    # 预览框按较高的 4:3 撑开，两种比例都能完整放下：16:9 上下留白，
+    # 切换槽位时高度不跳，卡片也不会被挤到重叠。
+    PREVIEW_RATIO = (4, 3)
+    PREVIEW_MIN_HEIGHT = 140
+    PREVIEW_MAX_HEIGHT = 420
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("CoverPicker")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(240)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._slot = self.SLOT_PRIMARY
         self._paths = {self.SLOT_PRIMARY: "", self.SLOT_ALTERNATE: ""}
@@ -602,13 +613,14 @@ class CoverPicker(QFrame):
             button.clicked.connect(lambda _=False, k=key: self.set_active_slot(k))
             self.slot_buttons[key] = button
             slot_row.addWidget(button)
+        self._refresh_slot_buttons()
         self.slot_bar.hide()
         layout.addWidget(self.slot_bar)
 
         self.preview = QLabel("拖入封面图片\n或点击选择")
         self.preview.setObjectName("CoverPreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumHeight(96)
+        self.preview.setMinimumHeight(self.PREVIEW_MIN_HEIGHT)
         self.preview.setWordWrap(True)
         self.hint = QLabel(self.SLOT_HINTS[self._slot])
         self.hint.setObjectName("DropHint")
@@ -638,6 +650,20 @@ class CoverPicker(QFrame):
     def set_slot_bar_visible(self, visible: bool) -> None:
         """显示 / 隐藏槽切换条；骨架默认隐藏，避免未接线时多出一行。"""
         self.slot_bar.setVisible(visible)
+
+    def _refresh_slot_buttons(self) -> None:
+        """槽按钮的文字后缀 / 提示随「这个槽有没有自己的图」变化。"""
+        for slot, button in self.slot_buttons.items():
+            path = self._paths[slot]
+            button.setText(
+                self.SLOT_LABELS[slot] + (self.SLOT_DONE_MARK if path else "")
+            )
+            if path:
+                button.setToolTip(f"已选：{Path(path).name}")
+            elif slot == self.SLOT_ALTERNATE and self._paths[self.SLOT_PRIMARY]:
+                button.setToolTip("未单独上传；投稿时会用主图裁剪版补 4:3")
+            else:
+                button.setToolTip("尚未上传")
 
     def path_for(self, key: str | None = None) -> str:
         return self._paths.get(key or self._slot, "")
@@ -683,6 +709,7 @@ class CoverPicker(QFrame):
             self._paths[self._slot] = ""
             if self._slot == self.SLOT_PRIMARY:
                 self._update_sync()
+            self._refresh_slot_buttons()
             self.preview.setPixmap(QPixmap())
             self.preview.setText("无法读取这张图片")
             self.hint.setText("请选择 JPG / PNG / WEBP 图片")
@@ -690,6 +717,7 @@ class CoverPicker(QFrame):
         self._paths[self._slot] = path
         if self._slot == self.SLOT_PRIMARY:
             self._update_sync()
+        self._refresh_slot_buttons()
         self._render()
         self.fileSelected.emit(path)
 
@@ -697,6 +725,7 @@ class CoverPicker(QFrame):
         self._paths[self._slot] = ""
         if self._slot == self.SLOT_PRIMARY:
             self._update_sync()
+        self._refresh_slot_buttons()
         self._render()
         self.fileSelected.emit("")
 
@@ -735,46 +764,63 @@ class CoverPicker(QFrame):
     # -- 绘制 ---------------------------------------------------------------
 
     def _slot_image(self) -> QImage:
+        """当前槽自己的图片；没有就是空图，不拿另一槽的图顶替预览。"""
         path = self._paths[self._slot]
-        if path:
-            image = QImage(path)
-            if not image.isNull():
-                return image
-        if self._slot == self.SLOT_ALTERNATE and self._paths[self.SLOT_PRIMARY]:
-            return QImage(self._sync_image)
-        return QImage()
+        if not path:
+            return QImage()
+        image = QImage(path)
+        return QImage() if image.isNull() else image
 
     def _placeholder_text(self) -> str:
         if self._slot == self.SLOT_ALTERNATE:
             if self._paths[self.SLOT_PRIMARY]:
-                return "点「用这张同步 4:3」\n从主图居中裁剪"
+                return "尚未单独上传 4:3 副图\n拖入图片，或点下方「用这张同步 4:3」"
             return "先选 16:9 主图再同步\n也可直接拖入 4:3 图片"
         return "拖入封面图片\n或点击选择"
 
+    def _hint_text(self) -> str:
+        path = self._paths[self._slot]
+        if path:
+            return Path(path).name
+        if self._slot == self.SLOT_ALTERNATE and self._paths[self.SLOT_PRIMARY]:
+            return "投稿时会用主图裁剪版补 4:3"
+        return self.SLOT_HINTS[self._slot]
+
+    def _preview_target_size(self) -> QSize:
+        """按卡片实际宽度算预览框大小：高度按 4:3 撑开，夹在上下限之间。"""
+        width = self.preview.width()
+        if width <= 0:
+            return QSize()
+        ratio_w, ratio_h = self.PREVIEW_RATIO
+        height = round(width * ratio_h / ratio_w)
+        height = max(self.PREVIEW_MIN_HEIGHT, min(height, self.PREVIEW_MAX_HEIGHT))
+        return QSize(width, height)
+
+    def _apply_preview_height(self) -> None:
+        target = self._preview_target_size()
+        if target.isValid() and self.preview.minimumHeight() != target.height():
+            self.preview.setMinimumHeight(target.height())
+
     def _render(self) -> None:
+        self._apply_preview_height()
         image = self._slot_image()
         if image.isNull():
             self.preview.setPixmap(QPixmap())
             self.preview.setText(self._placeholder_text())
-            self.hint.setText(self.SLOT_HINTS[self._slot])
+            self.hint.setText(self._hint_text())
             return
-        size = self.preview.size()
-        if size.width() <= 0 or size.height() <= 0:
+        size = self._preview_target_size()
+        if size.isEmpty():
             return
+        # 完整显示整张图，不居中裁剪：预览框按 4:3 撑开，图片等比缩放进去。
         scaled = image.scaled(
             size,
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        x = max(0, (scaled.width() - size.width()) // 2)
-        y = max(0, (scaled.height() - size.height()) // 2)
-        self.preview.setPixmap(QPixmap.fromImage(scaled.copy(x, y, size.width(), size.height())))
+        self.preview.setPixmap(QPixmap.fromImage(scaled))
         self.preview.setText("")
-        own_path = self._paths[self._slot]
-        if own_path:
-            self.hint.setText(Path(own_path).name)
-        else:
-            self.hint.setText("由 16:9 主图居中裁剪 · 4:3")
+        self.hint.setText(self._hint_text())
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -1793,8 +1839,25 @@ class SearchSyntaxDialog(QDialog):
         layout.addWidget(buttons)
 
 
-def chip(text: str, level: str = "info") -> QLabel:
-    label = QLabel(text)
+class ClickableLabel(QLabel):
+    """可点击的 QLabel（TopBar 登录芯片用）：手型光标 + ``clicked`` 信号。"""
+
+    clicked = Signal()
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
+            event.position().toPoint()
+        ):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+def chip(text: str, level: str = "info", *, clickable: bool = False) -> QLabel:
+    label = ClickableLabel(text) if clickable else QLabel(text)
     label.setObjectName({"ok": "ChipOk", "warn": "ChipWarn", "bad": "ChipBad"}.get(level, "Chip"))
     return label
 

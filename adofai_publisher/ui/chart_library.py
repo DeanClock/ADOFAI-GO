@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QPaintEvent,
     QPen,
     QPixmap,
+    QResizeEvent,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -41,7 +42,9 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyledItemDelegate,
     QStyle,
+    QStyleOptionButton,
     QStyleOptionViewItem,
+    QStylePainter,
     QTableWidget,
     QTableWidgetItem,
     QToolTip,
@@ -85,6 +88,45 @@ def _choice_combo() -> QComboBox:
     from .widgets import ChoiceCombo
 
     return ChoiceCombo()
+
+
+class ElidedLabel(QLabel):
+    """单行标签：宽度不够时显示省略号，完整文本放进 tooltip。
+
+    在线列表的状态行会承载较长的错误信息（例如筛选数据加载失败的网络错误），
+    单行 + 省略号可以避免它把结果列表往下顶，也不会撑宽挤走同一行的控件。
+    """
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+        self.setWordWrap(False)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:  # type: ignore[override]
+        self._full_text = str(text)
+        self.setToolTip(self._full_text)
+        self._update_elided()
+
+    def fullText(self) -> str:
+        return self._full_text
+
+    def _update_elided(self) -> None:
+        width = self.contentsRect().width()
+        elided = self.fontMetrics().elidedText(
+            self._full_text, Qt.TextElideMode.ElideRight, max(0, width)
+        )
+        super().setText(elided)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._update_elided()
+
+    def changeEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        # 换主题会改字号，省略位置要按新字体重算。
+        if event.type() == QEvent.Type.FontChange:
+            self._update_elided()
 
 
 def _q_difficulty_title(count: int, total: int) -> str:
@@ -1011,6 +1053,14 @@ class PersistentMenu(QMenu):
 
 
 class FilterMenuButton(QPushButton):
+    """筛选下拉按钮：宽度不够时绘制省略号，完整文案放进 tooltip。
+
+    1080×720 下筛选行只有约 750px，勾选「特殊难度 / Q 难度」后按钮文案会
+    变长（例如「Q 难度 · 3/11」），QPushButton 默认把放不下的文字直接切掉。
+    这里只在绘制时按当前宽度省略：``text()`` 与 sizeHint 仍按完整文案计算，
+    不会被省略后的短文字反过来挤小，窗口变宽后自动恢复全文显示。
+    """
+
     changed = Signal()
 
     def __init__(
@@ -1025,17 +1075,74 @@ class FilterMenuButton(QPushButton):
         self.setMinimumHeight(34)
         self._title = title
         self._title_formatter = title_formatter
+        self._base_tooltip = ""
         self._menu = PersistentMenu(self)
         self.setMenu(self._menu)
         self._actions: list[QAction] = []
         self._group_menus: dict[str, QMenu] = {}
         self._updating = False
 
+    def _label_width(self) -> int:
+        """当前宽度下文字真正可用的宽度（扣掉内边距、边框与菜单箭头）。"""
+        fm = self.fontMetrics()
+        chrome = self.sizeHint().width() - fm.horizontalAdvance(self.text())
+        return max(0, self.width() - chrome)
+
+    def _elided_text(self) -> str:
+        # 布局按 sizeHint 分配宽度；只有真的被挤窄时才省略。刚好拿到自然宽度
+        # 时不能省：真实字体的 advance 是小数，horizontalAdvance 取整后按
+        # 整数宽度去 elidedText 会误判「差一点」，把全文变成「Curati…」。
+        if self.width() >= self.sizeHint().width():
+            return self.text()
+        return self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideRight, self._label_width()
+        )
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
+        elided = self._elided_text()
+        if elided == self.text():
+            super().paintEvent(event)
+            return
+        # 与 QPushButton::paintEvent 相同，只是把交给样式绘制的文字换成省略版。
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = elided
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        painter.end()
+
+    def setToolTip(self, text: str) -> None:  # type: ignore[override]
+        self._base_tooltip = str(text)
+        self._sync_tooltip()
+
+    def _sync_tooltip(self) -> None:
+        if self._elided_text() != self.text():
+            tip = (
+                self.text()
+                if not self._base_tooltip
+                else f"{self._base_tooltip}\n\n{self.text()}"
+            )
+        else:
+            tip = self._base_tooltip
+        if tip != QPushButton.toolTip(self):
+            QPushButton.setToolTip(self, tip)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._sync_tooltip()
+
+    def changeEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        # 换主题会改字号，省略位置要按新字体重算。
+        if event.type() == QEvent.Type.FontChange:
+            self._sync_tooltip()
+
     def clear_menu(self) -> None:
         self._menu.clear()
         self._actions = []
         self._group_menus = {}
         self.setText(self._title)
+        self._sync_tooltip()
 
     def add_item(
         self,
@@ -1089,6 +1196,7 @@ class FilterMenuButton(QPushButton):
             self.setText(self._title_formatter(count, len(self._actions)))
         else:
             self.setText(f"{self._title} ({count})" if count else self._title)
+        self._sync_tooltip()
 
 
 DETAIL_COVER_SIZE = 112
@@ -2302,7 +2410,7 @@ class ChartLibraryPage(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         search_row = QHBoxLayout()
         search_row.setSpacing(metrics().space_8)
@@ -2331,8 +2439,12 @@ class ChartLibraryPage(QWidget):
 
         filters = QFrame()
         filters.setObjectName("FilterPanel")
+        # 这一行在 1080×720（库页内容宽 824）下要放排序、四个筛选下拉、重置和
+        # 视图切换，按主题默认的 14px 横向内边距会把「Curation」挤出可视区。
+        # 只收紧筛选面板里按钮的横向内边距（纵向仍是 7px，高度不变）。
+        filters.setStyleSheet("QPushButton#GhostButton { padding: 7px 8px; }")
         filter_layout = QVBoxLayout(filters)
-        filter_layout.setContentsMargins(12, 8, 12, 8)
+        filter_layout.setContentsMargins(8, 8, 8, 8)
         filter_layout.setSpacing(0)
 
         # 第一行：标题 + 主难度滑块（整行，避免被按钮挤窄）。
@@ -2349,9 +2461,30 @@ class ChartLibraryPage(QWidget):
         filter_layout.addLayout(slider_row)
         filter_layout.addSpacing(8)
 
-        # 第二行：筛选下拉框，右端与滑块右端对齐。
+        # 第二行：左端排序控件（原来单独占一行，移到这里用掉空白），
+        # 右端筛选下拉框，右端与滑块右端对齐。
         filter_row = QHBoxLayout()
-        filter_row.setSpacing(8)
+        # 1080 宽度下这一行只有约 742px，压到 6px 才能让每个控件的文字都完整。
+        filter_row.setSpacing(6)
+        sort_label = QLabel("排序")
+        sort_label.setObjectName("Faint")
+        self.sort_combo = _choice_combo()
+        # 排序项里最长的是「总通关数」，按 3 个字的度量宽度定自然宽度（实际
+        # 内容区 61px，足够放下 4 个汉字）；窗口窄时不会把同一行的筛选按钮挤到重叠。
+        self.sort_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.sort_combo.setMinimumContentsLength(3)
+        for label, _key in SORT_OPTIONS:
+            self.sort_combo.addItem(label)
+        self.sort_combo.currentIndexChanged.connect(lambda *_: self._emit_search())
+        self.order_button = QPushButton("↓ 降序")
+        self.order_button.setObjectName("GhostButton")
+        self.order_button.setFixedWidth(76)
+        self.order_button.clicked.connect(self._toggle_order)
+        filter_row.addWidget(sort_label)
+        filter_row.addWidget(self.sort_combo)
+        filter_row.addWidget(self.order_button)
         filter_row.addStretch(1)
         self.special_button = FilterMenuButton("特殊难度")
         for name in SPECIAL_DIFFICULTIES:
@@ -2359,7 +2492,6 @@ class ChartLibraryPage(QWidget):
         self.q_button = FilterMenuButton(
             "Q 难度", title_formatter=_q_difficulty_title
         )
-        self.q_button.setMinimumWidth(104)
         self.q_button.setToolTip(
             "TUF 的 Q 难度按 G/U 每 4 级分桶，共 11 个桶（Qq、GQ0~GQ4、UQ0~UQ4），"
             "每桶覆盖 4 个小级（如 GQ0 = G1~G4）。默认全选；全部取消即不带任何 Q 桶。"
@@ -2388,42 +2520,33 @@ class ChartLibraryPage(QWidget):
         ):
             button.changed.connect(self._schedule_search)
             filter_row.addWidget(button)
-        self.reset_button = QPushButton("重置筛选")
+        self.reset_button = QPushButton("重置")
         self.reset_button.setObjectName("GhostButton")
         self.reset_button.clicked.connect(self._reset_filters)
         filter_row.addWidget(self.reset_button)
-        filter_layout.addLayout(filter_row)
-        layout.addWidget(filters)
-
-        sort_row = QHBoxLayout()
-        sort_row.setSpacing(8)
-        sort_label = QLabel("排序")
-        sort_label.setObjectName("Faint")
-        self.sort_combo = _choice_combo()
-        for label, _key in SORT_OPTIONS:
-            self.sort_combo.addItem(label)
-        self.sort_combo.currentIndexChanged.connect(lambda *_: self._emit_search())
-        self.order_button = QPushButton("↓ 降序")
-        self.order_button.setObjectName("GhostButton")
-        self.order_button.setFixedWidth(88)
-        self.order_button.clicked.connect(self._toggle_order)
+        # 视图切换也并入筛选行右端：下拉框在真实主题下高 38px，
+        # 留在 meta 行会把结果列表往下顶，移到这里 meta 行只剩单行文字。
         self.view_combo = _choice_combo()
         self.view_combo.addItems(["标准视图", "紧凑视图"])
         self.view_combo.currentIndexChanged.connect(self._set_compact)
-        sort_row.addWidget(sort_label)
-        sort_row.addWidget(self.sort_combo)
-        sort_row.addWidget(self.order_button)
-        sort_row.addStretch(1)
+        filter_row.addWidget(self.view_combo)
+        filter_layout.addLayout(filter_row)
+        layout.addWidget(filters)
+
+        # 紧凑 meta 行：状态与结果总数共用一行，把列表往上提。
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(8)
+        self.online_status = ElidedLabel("输入关键词，或直接浏览 TUF 谱面库")
+        self.online_status.setObjectName("Faint")
+        self.online_status.setWordWrap(False)
+        self.online_status.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        meta_row.addWidget(self.online_status, 1)
         self.total_label = QLabel("0 条结果")
         self.total_label.setObjectName("Muted")
-        sort_row.addWidget(self.total_label)
-        sort_row.addWidget(self.view_combo)
-        layout.addLayout(sort_row)
-
-        self.online_status = QLabel("输入关键词，或直接浏览 TUF 谱面库")
-        self.online_status.setObjectName("Faint")
-        self.online_status.setWordWrap(True)
-        layout.addWidget(self.online_status)
+        meta_row.addWidget(self.total_label)
+        layout.addLayout(meta_row)
 
         self.online_model = ChartListModel(self)
         self.online_list = self._make_list(self.online_model)
@@ -2440,6 +2563,7 @@ class ChartLibraryPage(QWidget):
         self.more_button = QPushButton("加载更多")
         self.more_button.setObjectName("GhostButton")
         self.more_button.setMinimumWidth(110)
+        self.more_button.setToolTip("继续滚动到底部，或点「加载更多」继续加载")
         self.more_button.clicked.connect(self._load_more_clicked)
         self.more_button.hide()
         more_row.addWidget(self.more_button)
@@ -2932,10 +3056,7 @@ class ChartLibraryPage(QWidget):
             self.online_model.set_items(items)
         count = len(self.online_model.items())
         self.total_label.setText(f"{self._total:,} 条结果" if self._total else f"{count} 条")
-        self.online_status.setText(
-            f"已显示 {count} 条"
-            + (" · 继续滚动，或点下方「加载更多」" if self._has_more else "")
-        )
+        self.online_status.setText(f"已显示 {count} 条")
         self.more_button.setVisible(self._has_more)
         self._show_empty(self.online_list, self.online_empty, count == 0)
 

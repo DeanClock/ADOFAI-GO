@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -98,6 +99,61 @@ def test_ensure_bridge_mod_replaces_stale_dll(tmp_path, monkeypatch):
     game_bridge.ensure_bridge_mod(settings)
 
     assert (mod_dir / "ADOFAIGOBridge.dll").read_bytes() == b"fake-dll"
+
+
+def _stale_author_install(tmp_path: Path, monkeypatch) -> tuple[Settings, Path]:
+    """构造一个版本、DLL 都与源一致，只有 Info.json 署名是旧的安装。"""
+    game = tmp_path / "game"
+    game.mkdir()
+    source = _source(tmp_path)
+    (source / "Info.json").write_text(
+        '{"Id":"ADOFAIGOBridge","Author":"DeanClock",'
+        f'"Version":"{game_bridge.BRIDGE_VERSION}"}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(game_bridge, "bridge_source_dir", lambda: source)
+    settings = _settings(tmp_path, game)
+    mod_dir = game / "Mods" / "ADOFAIGOBridge"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "Info.json").write_text(
+        f'{{"Id":"ADOFAIGOBridge","Author":"Legacy Author",'
+        f'"Version":"{game_bridge.BRIDGE_VERSION}"}}',
+        encoding="utf-8",
+    )
+    (mod_dir / "ADOFAIGOBridge.dll").write_bytes(b"fake-dll")
+    return settings, mod_dir
+
+
+def test_ensure_bridge_mod_syncs_stale_info_json_author(tmp_path, monkeypatch):
+    settings, mod_dir = _stale_author_install(tmp_path, monkeypatch)
+
+    result = game_bridge.ensure_bridge_mod(settings)
+
+    assert result == mod_dir
+    info = json.loads((mod_dir / "Info.json").read_text(encoding="utf-8"))
+    assert info["Author"] == "DeanClock"
+    assert (mod_dir / "ADOFAIGOBridge.dll").read_bytes() == b"fake-dll"
+
+
+def test_ensure_bridge_mod_info_sync_is_idempotent(tmp_path, monkeypatch):
+    settings, mod_dir = _stale_author_install(tmp_path, monkeypatch)
+    game_bridge.ensure_bridge_mod(settings)
+    synced = (mod_dir / "Info.json").read_bytes()
+    assert "DeanClock" in synced.decode("utf-8")
+
+    game_bridge.ensure_bridge_mod(settings)
+
+    assert (mod_dir / "Info.json").read_bytes() == synced
+    assert (mod_dir / "ADOFAIGOBridge.dll").read_bytes() == b"fake-dll"
+
+
+def test_repair_bridge_mod_overwrites_stale_info_json(tmp_path, monkeypatch):
+    settings, mod_dir = _stale_author_install(tmp_path, monkeypatch)
+
+    game_bridge.repair_bridge_mod(settings)
+
+    info = json.loads((mod_dir / "Info.json").read_text(encoding="utf-8"))
+    assert info["Author"] == "DeanClock"
 
 
 def test_repair_bridge_mod_reinstalls_missing_files(tmp_path, monkeypatch):

@@ -515,7 +515,7 @@ def _make_image(path, width: int, height: int) -> str:
 def test_cover_picker_keeps_two_slots_and_syncs_cropped_image(app, tmp_path):
     primary = _make_image(tmp_path / "primary.png", 400, 200)
     picker = CoverPicker()
-    picker.resize(320, 220)
+    picker.resize(360, 380)
     picker.show()
     app.processEvents()
     try:
@@ -525,6 +525,14 @@ def test_cover_picker_keeps_two_slots_and_syncs_cropped_image(app, tmp_path):
         assert seen == [primary]
         assert picker.active_slot == CoverPicker.SLOT_PRIMARY
         assert picker.path_for("primary") == primary
+        # 主槽显示自己的图，等比完整显示（400×200 → 2:1），不居中裁剪。
+        assert not picker._slot_image().isNull()
+        shown = picker.preview.pixmap()
+        assert not shown.isNull()
+        assert abs(shown.width() / shown.height() - 2.0) < 0.02
+        assert picker.slot_buttons[CoverPicker.SLOT_PRIMARY].text().endswith("✓")
+        assert "✓" not in picker.slot_buttons[CoverPicker.SLOT_ALTERNATE].text()
+        primary_preview_height = picker.preview.minimumHeight()
 
         synced = picker.sync_image()
         assert not synced.isNull()
@@ -541,23 +549,77 @@ def test_cover_picker_keeps_two_slots_and_syncs_cropped_image(app, tmp_path):
         changes: list[str] = []
         picker.slotChanged.connect(changes.append)
         picker.set_active_slot(CoverPicker.SLOT_ALTERNATE)
+        app.processEvents()
         assert changes == ["alternate"]
         assert picker.path_for("alternate") == ""
-        # 备用槽还没自己的图时，预览用主封面裁出来的那张。
-        assert not picker._slot_image().isNull()
+        # 副槽没有自己的图：预览是空状态，不再拿主图的裁剪版顶替。
+        assert picker._slot_image().isNull()
+        assert picker.preview.pixmap().isNull()
+        assert "尚未单独上传 4:3 副图" in picker.preview.text()
+        assert "用这张同步 4:3" in picker.preview.text()
+        assert picker.hint.text() == "投稿时会用主图裁剪版补 4:3"
+        # 预览框固定按 4:3 撑开：切换槽位高度不跳，两种比例都能完整放下，
+        # 而且比过去的 96px 明显加大。
+        assert picker.preview.minimumHeight() == primary_preview_height
+        assert picker.preview.minimumHeight() >= 140
+        assert (
+            abs(
+                picker.preview.minimumHeight()
+                - round(picker.preview.width() * 3 / 4)
+            )
+            <= 2
+        )
 
-        alt = _make_image(tmp_path / "alt.png", 320, 180)
+        alt = _make_image(tmp_path / "alt.png", 320, 240)
         picker.set_file(alt)
         assert picker.path_for("alternate") == alt
         assert picker.path_for("primary") == primary
+        assert not picker._slot_image().isNull()
+        assert "✓" in picker.slot_buttons[CoverPicker.SLOT_ALTERNATE].text()
+        assert picker.hint.text() == "alt.png"
 
         picker.set_active_slot(CoverPicker.SLOT_PRIMARY)
         picker.clear()
         assert picker.path_for("primary") == ""
         assert picker.sync_image().isNull()
+        assert "✓" not in picker.slot_buttons[CoverPicker.SLOT_PRIMARY].text()
+        assert "✓" in picker.slot_buttons[CoverPicker.SLOT_ALTERNATE].text()
+
+        # 主图已清掉；再清掉副槽自己的图 → 两个槽都空。
+        picker.set_active_slot(CoverPicker.SLOT_ALTERNATE)
+        app.processEvents()
+        assert not picker.preview.pixmap().isNull()  # alt 自己还在
+        picker.clear()
+        assert picker.path_for("alternate") == ""
+        assert picker.preview.pixmap().isNull()
+        assert "先选 16:9 主图再同步" in picker.preview.text()
+        assert picker.hint.text() == CoverPicker.SLOT_HINTS[CoverPicker.SLOT_ALTERNATE]
+        assert "✓" not in picker.slot_buttons[CoverPicker.SLOT_ALTERNATE].text()
 
         picker.set_slot_bar_visible(True)
         assert not picker.slot_bar.isHidden()
+    finally:
+        picker.close()
+        picker.deleteLater()
+        app.processEvents()
+
+
+def test_cover_picker_preview_shows_whole_image_without_cropping(app, tmp_path):
+    """非槽位比例的图也要完整显示：pixmap 保持源图比例，不裁成预览框。"""
+    tall = _make_image(tmp_path / "tall.png", 200, 300)
+    picker = CoverPicker()
+    picker.resize(360, 520)
+    picker.show()
+    app.processEvents()
+    try:
+        picker.set_file(tall)
+        app.processEvents()
+        shown = picker.preview.pixmap()
+        assert not shown.isNull()
+        assert abs(shown.width() / shown.height() - 200 / 300) < 0.03
+        # 整张图都落在预览框内，没有被裁掉上下或左右。
+        assert shown.width() <= picker.preview.width()
+        assert shown.height() <= picker.preview.height()
     finally:
         picker.close()
         picker.deleteLater()

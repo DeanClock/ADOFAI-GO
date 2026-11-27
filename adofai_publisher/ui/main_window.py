@@ -419,8 +419,11 @@ class MainWindow(QMainWindow):
         title_box.addWidget(self.page_title)
         title_box.addWidget(self.page_subtitle)
         top_layout.addLayout(title_box, 1)
-        self.bili_chip = chip("B 站：未检测")
-        self.tuf_chip = chip("TUF：未检测")
+        self.bili_chip = chip("B 站：未检测", clickable=True)
+        self.tuf_chip = chip("TUF：未检测", clickable=True)
+        for login_chip in (self.bili_chip, self.tuf_chip):
+            login_chip.setToolTip("点击前往设置登录")
+            login_chip.clicked.connect(self._open_login_settings)
         top_layout.addWidget(self.bili_chip)
         top_layout.addWidget(self.tuf_chip)
         self.check_button = QPushButton("检查登录")
@@ -3658,6 +3661,16 @@ class MainWindow(QMainWindow):
                 refresh()
             else:
                 dialog.set_theme(theme)
+
+    def _open_login_settings(self) -> None:
+        """点 TopBar 登录芯片：跳到设置页的登录区。
+
+        已经在设置页时不重新 ``load()``，避免冲掉未保存的修改。
+        """
+
+        already_there = self.stack.currentWidget() is self.settings_page
+        self._navigate("settings", reload_settings=not already_there)
+        QTimer.singleShot(0, self.settings_page.focus_login_section)
 
     def _open_obs_settings(self) -> None:
         self._navigate("settings")

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -60,6 +61,7 @@ from ..tuf_review import (
 )
 from ..wizard_state import generate_copy, make_tags
 from .interactions import set_tone
+from .theme import active_theme, palette
 from .widgets import (
     AccuracyBadge,
     Card,
@@ -272,6 +274,11 @@ class WorkspacePage(QWidget):
 
         card = Card("第二步 · 选择通关视频", "视频只在本机读取，工具不会上传到任何第三方服务器。")
         self.drop_zone = DropZone()
+        # 右侧封面卡片放大预览后会更高：让投递区吸收多出来的高度，
+        # 卡片标题与副标题仍贴顶，不会被拉开。
+        self.drop_zone.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
         self.drop_zone.fileSelected.connect(self._on_video_selected)
         card.body.addWidget(self.drop_zone)
         # 提示 chip 用 FlowLayout：窄窗口下换行，不把卡片最小宽度顶宽。
@@ -287,8 +294,8 @@ class WorkspacePage(QWidget):
 
         cover_card = Card(
             "封面（可选）",
-            "16:9 主图进「个人空间封面」，4:3 副图进「首页推荐封面」，"
-            "副图可用主图一键裁剪；只选一张时两个框都用它。"
+            "16:9 主图进「个人空间封面」，4:3 副图进「首页推荐封面」；"
+            "可分别上传，也可用主图一键裁剪；只传主图时投稿会用裁剪版补 4:3；"
             "都不选则由 B 站从视频帧自动生成。",
         )
         self.cover_picker = CoverPicker()
@@ -450,13 +457,22 @@ class WorkspacePage(QWidget):
         snippet_card = Card(
             "常用词条",
             "先点一下标题、简介或标签，再点词条，就会插入到该框的光标处；"
-            "有选区时替换选区。可在「06 设置 → 文案模板」增删改。",
+            "有选区时替换选区。点「新增词条」可直接添加，编辑与删除在「06 设置 → 文案模板」。",
         )
         self.snippet_box = QVBoxLayout()
         self.snippet_box.setSpacing(8)
         snippet_card.body.addLayout(self.snippet_box)
+        hint_row = QHBoxLayout()
+        hint_row.setSpacing(8)
         self.snippet_hint = _label("", "Faint")
-        snippet_card.body.addWidget(self.snippet_hint)
+        hint_row.addWidget(self.snippet_hint, 1)
+        self.snippet_add_button = QPushButton("新增词条")
+        self.snippet_add_button.setObjectName("GhostButton")
+        self.snippet_add_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.snippet_add_button.setToolTip("添加常用词条并立即保存")
+        self.snippet_add_button.clicked.connect(self._add_copy_snippet)
+        hint_row.addWidget(self.snippet_add_button)
+        snippet_card.body.addLayout(hint_row)
         layout.addWidget(snippet_card)
         self.refresh_snippets()
 
@@ -552,7 +568,7 @@ class WorkspacePage(QWidget):
         snippets = normalize_copy_snippets(self.settings.get("copy_snippets"))
         if not snippets:
             self.snippet_box.addWidget(
-                _label("暂无词条，可在「06 设置 → 文案模板」添加。", "Faint")
+                _label("暂无词条，点「新增词条」即可添加。", "Faint")
             )
             return
         for group in SNIPPET_GROUPS:
@@ -591,6 +607,26 @@ class WorkspacePage(QWidget):
                 self._snippet_buttons.append(button)
             row.addLayout(grid, 1)
             self.snippet_box.addLayout(row)
+
+    def _add_copy_snippet(self, _checked: bool = False) -> None:
+        """在工作台直接新增词条并立即保存，成功后重建词条卡片。"""
+        dialog = CopySnippetDialog(parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        text, group = dialog.value()
+        text = (text or "").strip()
+        group = group if group in SNIPPET_GROUPS else "自定义"
+        snippets = normalize_copy_snippets(self.settings.get("copy_snippets"))
+        if not text or any(
+            item["text"] == text and item["group"] == group for item in snippets
+        ):
+            QMessageBox.information(self, "无法添加", "词条为空或已存在。")
+            return
+        snippets.append({"text": text, "group": group})
+        self.settings.set("copy_snippets", snippets)
+        self.settings.save()
+        self.refresh_snippets()
+        self.snippet_hint.setText(f"已新增词条「{text}」（{group}）")
 
     def _insert_copy_snippet(
         self, snippet: str, source: QPushButton | None = None
@@ -746,6 +782,8 @@ class WorkspacePage(QWidget):
             self.draft.cover_path_43 = path
         else:
             self.draft.cover_path = path
+        # 「已生成 4:3 副图」是一次同步的结果；换图或清空后不再挂着。
+        self.cover_status.clear()
         self._refresh_cover_actions()
         self._refresh_check()
         self.changed.emit()
@@ -1614,8 +1652,21 @@ class HistoryPage(QWidget):
     reviewSyncRequested = Signal()
     tufListRequested = Signal()
 
+    #: 状态下拉的 (值, 文案) —— 文案与 ``_status_text()`` 一致。
+    STATUS_FILTERS: tuple[tuple[str, str], ...] = (
+        ("draft", "草稿"),
+        ("bili_only", "仅 B 站"),
+        ("bili_uploaded", "已上 B 站"),
+        ("submitted", "已双投"),
+        ("failed", "失败"),
+    )
+    #: 审核下拉的取值 —— 文案走 ``review_text()``，与表格「审核」列一致。
+    REVIEW_FILTERS: tuple[str, ...] = ("pending", "approved", "declined")
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._records: list[dict[str, Any]] = []
+        self._filtered_records: list[dict[str, Any]] = []
         outer = QVBoxLayout(self)
         outer.setContentsMargins(28, 8, 28, 18)
         outer.setSpacing(12)
@@ -1652,6 +1703,27 @@ class HistoryPage(QWidget):
         toolbar.addWidget(clear)
         outer.addLayout(toolbar)
 
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("搜索曲名 / 标题 / BV 号 / TUF 编号")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setToolTip("输入关键字即时过滤下面的记录")
+        self.status_combo = ChoiceCombo()
+        self.status_combo.setToolTip("按投稿状态筛选")
+        self.status_combo.addItem("全部状态", "")
+        for value, text in self.STATUS_FILTERS:
+            self.status_combo.addItem(text, value)
+        self.review_combo = ChoiceCombo()
+        self.review_combo.setToolTip("按 TUF 审核状态筛选")
+        self.review_combo.addItem("全部审核", "")
+        for value in self.REVIEW_FILTERS:
+            self.review_combo.addItem(review_text(value), value)
+        filter_row.addWidget(self.search_input, 1)
+        filter_row.addWidget(self.status_combo)
+        filter_row.addWidget(self.review_combo)
+        outer.addLayout(filter_row)
+
         self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
             ["时间", "谱面", "难度", "精准度", "BV 号", "TUF", "状态", "审核"]
@@ -1661,15 +1733,72 @@ class HistoryPage(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setToolTip("右键：载入到工作台、复制 BV 号、打开 B 站视频或删除记录")
         self.table.doubleClicked.connect(lambda _: self._load_selected())
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_context_menu)
         outer.addWidget(self.table, 1)
 
         self.empty_label = _label("还没有投稿记录。完成一次双投后会出现在这里。", "Muted")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer.addWidget(self.empty_label)
 
+        self.search_input.textChanged.connect(lambda _text: self._apply_filters())
+        self.status_combo.currentIndexChanged.connect(
+            lambda _index: self._apply_filters()
+        )
+        self.review_combo.currentIndexChanged.connect(
+            lambda _index: self._apply_filters()
+        )
+
     def set_records(self, records: list[dict[str, Any]]) -> None:
-        self._records = records
+        self._records = list(records)
+        self._apply_filters()
+
+    def remember(self, records: list[dict[str, Any]]) -> None:
+        self._records = list(records)
+
+    # -- 过滤与渲染 ---------------------------------------------------------
+
+    def _matches_query(self, record: dict[str, Any], query: str) -> bool:
+        haystack = " ".join(
+            str(record.get(key) or "")
+            for key in ("song", "title", "bvid", "tuf_record_id", "tuf_id")
+        ).lower()
+        return query in haystack
+
+    def _apply_filters(self) -> None:
+        """按搜索框 / 状态 / 审核过滤，只重建表格，不动完整 ``_records``。"""
+
+        query = self.search_input.text().strip().lower()
+        status = self.status_combo.currentData() or ""
+        review = self.review_combo.currentData() or ""
+        filtered: list[dict[str, Any]] = []
+        for record in self._records:
+            if query and not self._matches_query(record, query):
+                continue
+            if status and (record.get("status") or "") != status:
+                continue
+            if review and normalize_review_status(record.get("review_status")) != review:
+                continue
+            filtered.append(record)
+        self._filtered_records = filtered
+        self._render_rows(filtered)
+        total = len(self._records)
+        self.count_label.setText(f"{len(filtered)} / {total} 条记录")
+        if filtered:
+            self.empty_label.setVisible(False)
+            self.table.setVisible(True)
+            return
+        self.table.setVisible(False)
+        self.empty_label.setText(
+            "没有符合筛选条件的记录。"
+            if total
+            else "还没有投稿记录。完成一次双投后会出现在这里。"
+        )
+        self.empty_label.setVisible(True)
+
+    def _render_rows(self, records: list[dict[str, Any]]) -> None:
         self.table.setRowCount(0)
         for record in records:
             row = self.table.rowCount()
@@ -1689,10 +1818,60 @@ class HistoryPage(QWidget):
                 if column == 0:
                     item.setData(Qt.ItemDataRole.UserRole, record.get("id"))
                 self.table.setItem(row, column, item)
+            status_item = self.table.item(row, 6)
+            if status_item is not None:
+                status_item.setData(
+                    Qt.ItemDataRole.UserRole, str(record.get("status") or "")
+                )
+            review_item = self.table.item(row, 7)
+            if review_item is not None:
+                review_item.setData(
+                    Qt.ItemDataRole.UserRole,
+                    normalize_review_status(record.get("review_status")),
+                )
         self.table.resizeColumnsToContents()
-        self.empty_label.setVisible(not records)
-        self.table.setVisible(bool(records))
-        self.count_label.setText(f"{len(records)} 条记录")
+        self._apply_cell_colors()
+
+    @staticmethod
+    def _set_item_color(item: QTableWidgetItem, color: QColor | None) -> None:
+        if color is None:
+            item.setData(Qt.ItemDataRole.ForegroundRole, None)
+        else:
+            item.setForeground(color)
+
+    def _apply_cell_colors(self) -> None:
+        """给「审核」「状态」列上主题语义色；未同步 / 正常状态保持默认色。"""
+
+        colors = palette(active_theme())
+        success = QColor(colors["success"])
+        warning = QColor(colors["warning"])
+        danger = QColor(colors["danger"])
+        review_colors = {
+            "pending": warning,
+            "approved": success,
+            "declined": danger,
+        }
+        for row in range(self.table.rowCount()):
+            status_item = self.table.item(row, 6)
+            if status_item is not None:
+                failed = status_item.data(Qt.ItemDataRole.UserRole) == "failed"
+                self._set_item_color(status_item, danger if failed else None)
+            review_item = self.table.item(row, 7)
+            if review_item is not None:
+                state = review_item.data(Qt.ItemDataRole.UserRole)
+                self._set_item_color(review_item, review_colors.get(state))
+
+    def refresh_theme(self) -> None:
+        """主题切换后重新取语义色。"""
+
+        self._apply_cell_colors()
+
+    # -- 选中 / 右键菜单 ----------------------------------------------------
+
+    def _record_at(self, row: int) -> dict[str, Any] | None:
+        if 0 <= row < len(self._filtered_records):
+            return self._filtered_records[row]
+        return None
 
     def _selected_id(self) -> str:
         row = self.table.currentRow()
@@ -1705,9 +1884,8 @@ class HistoryPage(QWidget):
         row = self.table.currentRow()
         if row < 0:
             return
-        record = getattr(self, "_records", [])
         record_id = self._selected_id()
-        for item in record:
+        for item in self._records:
             if item.get("id") == record_id:
                 self.loadRequested.emit(item)
                 return
@@ -1723,8 +1901,43 @@ class HistoryPage(QWidget):
         if QMessageBox.question(self, "清空历史", "确定清空全部历史记录？此操作不可撤销。") == QMessageBox.StandardButton.Yes:
             self.clearRequested.emit()
 
-    def remember(self, records: list[dict[str, Any]]) -> None:
-        self._records = records
+    def _copy_bvid(self, bvid: str) -> None:
+        if bvid:
+            QGuiApplication.clipboard().setText(bvid)
+
+    def _open_bilibili(self, bvid: str) -> None:
+        if bvid:
+            QDesktopServices.openUrl(QUrl(f"https://www.bilibili.com/video/{bvid}"))
+
+    def _build_row_menu(self, row: int) -> QMenu:
+        """构造某一行记录的右键菜单（测试直接调用，不弹出）。"""
+
+        record = self._record_at(row) or {}
+        bvid = str(record.get("bvid") or "").strip()
+        menu = QMenu(self)
+        load_action = menu.addAction("载入到工作台")
+        load_action.triggered.connect(lambda: self.loadRequested.emit(record))
+        copy_action = menu.addAction("复制 BV 号")
+        copy_action.setEnabled(bool(bvid))
+        copy_action.triggered.connect(lambda: self._copy_bvid(bvid))
+        open_action = menu.addAction("打开 B 站视频页")
+        open_action.setEnabled(bool(bvid))
+        open_action.triggered.connect(lambda: self._open_bilibili(bvid))
+        menu.addSeparator()
+        delete_action = menu.addAction("删除记录")
+        delete_action.triggered.connect(self._delete_selected)
+        return menu
+
+    def _show_context_menu(self, pos: Any) -> None:
+        row = self.table.indexAt(pos).row()
+        if row < 0:
+            return
+        self.table.selectRow(row)
+        menu = self._build_row_menu(row)
+        try:
+            menu.exec(self.table.viewport().mapToGlobal(pos))
+        finally:
+            menu.deleteLater()
 
 
 def _review_time_text(value: Any) -> str:
@@ -2021,6 +2234,11 @@ class SettingsPage(QWidget):
         self.settings = settings
         # 上次 load()/save() 时的表单快照，用来判断是否有未保存修改。
         self._baseline: dict[str, Any] = {}
+        # 编辑表单后延迟刷新「有未保存的更改」提示（防抖，约 0.5 秒）。
+        self._dirty_timer = QTimer(self)
+        self._dirty_timer.setSingleShot(True)
+        self._dirty_timer.setInterval(450)
+        self._dirty_timer.timeout.connect(self._refresh_dirty_hint)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -2145,6 +2363,7 @@ class SettingsPage(QWidget):
         outer.addWidget(template_card)
 
         tool_card = Card("工具与账号", "")
+        self.tool_card = tool_card
         sav_row = QHBoxLayout()
         self.sav_input = QLineEdit()
         self.sav_input.setPlaceholderText("自动查找 data.sav，或手动指定")
@@ -2164,6 +2383,7 @@ class SettingsPage(QWidget):
         login_button = QPushButton("打开浏览器登录双站")
         login_button.setObjectName("PrimaryButton")
         login_button.clicked.connect(self.loginRequested)
+        self.login_button = login_button
         login_row.addWidget(self.login_status, 1)
         login_row.addWidget(login_button)
         tool_card.body.addLayout(login_row)
@@ -2379,12 +2599,41 @@ class SettingsPage(QWidget):
 
         save_row = QHBoxLayout()
         save_row.addStretch(1)
+        # 空串时高度不变（QLabel 始终占一行），不会让保存栏跳动。
+        self.dirty_hint = QLabel("")
+        self.dirty_hint.setToolTip("修改表单后点「保存设置」才会生效")
+        set_tone(self.dirty_hint, "warn")
+        save_row.addWidget(self.dirty_hint)
         save = QPushButton("保存设置")
         save.setObjectName("PrimaryButton")
         save.clicked.connect(self.save)
         save_row.addWidget(save)
         root.addLayout(save_row)
+        self._wire_dirty_tracking()
         self.load()
+
+    def _wire_dirty_tracking(self) -> None:
+        """任一表单控件变化后延迟刷新脏标记（不含顶部导航与按钮）。"""
+
+        for combo in self.findChildren(ChoiceCombo):
+            combo.currentIndexChanged.connect(self._schedule_dirty_hint)
+        for line_edit in self.findChildren(QLineEdit):
+            line_edit.textChanged.connect(self._schedule_dirty_hint)
+        for text_edit in self.findChildren(QPlainTextEdit):
+            text_edit.textChanged.connect(self._schedule_dirty_hint)
+        for check_box in self.findChildren(QCheckBox):
+            check_box.toggled.connect(self._schedule_dirty_hint)
+        for spin_box in self.findChildren(QSpinBox):
+            spin_box.valueChanged.connect(self._schedule_dirty_hint)
+        for double_spin in self.findChildren(QDoubleSpinBox):
+            double_spin.valueChanged.connect(self._schedule_dirty_hint)
+
+    def _schedule_dirty_hint(self, *_args: Any) -> None:
+        self._dirty_timer.start()
+
+    def _refresh_dirty_hint(self) -> None:
+        self._dirty_timer.stop()
+        self.dirty_hint.setText("有未保存的更改" if self.is_dirty() else "")
 
     def load(self) -> None:
         self.theme_combo.setCurrentIndex(0 if self.settings.get("theme") != "light" else 1)
@@ -2430,6 +2679,7 @@ class SettingsPage(QWidget):
             self.set_update_status("已配置更新仓库，点击「检查更新」", None)
         self.set_obs_advanced_visible(self._obs_advanced_should_expand())
         self._baseline = self._snapshot()
+        self._refresh_dirty_hint()
 
     def collect(self) -> dict[str, Any]:
         return {
@@ -2467,6 +2717,7 @@ class SettingsPage(QWidget):
         values = self.collect()
         self.saved.emit(values)
         self._baseline = deepcopy(values)
+        self._refresh_dirty_hint()
 
     def discard_changes(self) -> None:
         """丢弃未保存修改，表单复位到已保存的设置。"""
@@ -2484,6 +2735,10 @@ class SettingsPage(QWidget):
         self.snippet_count.setText(
             f"共 {len(self._snippets)} 条 · 修改后点击底部「保存设置」"
         )
+        # 词条表也能影响设置内容，增删改后要刷新脏标记。
+        timer = getattr(self, "_dirty_timer", None)
+        if timer is not None:
+            timer.start()
 
     def _selected_snippet_index(self) -> int:
         row = self.snippet_table.currentRow()
@@ -2631,6 +2886,12 @@ class SettingsPage(QWidget):
     def focus_obs_section(self) -> None:
         self._scroll_area.ensureWidgetVisible(self.obs_card, 0, 12)
         self.obs_password_input.setFocus()
+
+    def focus_login_section(self) -> None:
+        """把「工具与账号」卡片滚到可见，并聚焦浏览器登录按钮。"""
+
+        self._scroll_area.ensureWidgetVisible(self.tool_card, 0, 12)
+        self.login_button.setFocus()
 
     def focus_update_section(self) -> None:
         """把「软件更新」卡片滚到可见。"""

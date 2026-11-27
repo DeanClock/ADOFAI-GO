@@ -148,16 +148,21 @@ def install_bridge_mod(settings: Any, *, force: bool = False) -> Path:
     # 不能再建第二个同 Id 的目录（UMM 会加载两份 Bridge）。
     mod_dir = resolve_mod_dir(settings, BRIDGE_ID) or (_mods_dir(settings) / BRIDGE_ID)
     target_dll = mod_dir / BRIDGE_DLL_NAME
+    target_info = mod_dir / "Info.json"
+    # Info.json 也要比对：版本号和 DLL 都没变、但署名/描述更新过时，
+    # 已安装的旧副本同样要覆盖（例如作者署名发生变化）。
     if (
         not force
         and target_dll.is_file()
+        and target_info.is_file()
         and _installed_version(mod_dir) == BRIDGE_VERSION
         and _sha256(target_dll) == _sha256(source_dll)
+        and _sha256(target_info) == _sha256(source_info)
     ):
         return mod_dir
     try:
         mod_dir.mkdir(parents=True, exist_ok=True)
-        _copy_if_changed(source_info, mod_dir / "Info.json")
+        _copy_if_changed(source_info, target_info)
         _copy_if_changed(source_dll, target_dll)
     except OSError as exc:
         raise GameBridgeError(

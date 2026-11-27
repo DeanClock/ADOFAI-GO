@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QMouseEvent, QShortcut
+from PySide6.QtGui import QColor, QGuiApplication, QMouseEvent, QShortcut
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,7 +39,7 @@ from adofai_publisher.download_tasks import (
 )
 from adofai_publisher.models import Draft, LevelInfo
 from adofai_publisher.level_organizer import OrganizeItem, OrganizePlan
-from adofai_publisher.tuf_browse import Q_SPECIAL_DIFFICULTIES
+from adofai_publisher.tuf_browse import Q_SPECIAL_DIFFICULTIES, SORT_OPTIONS
 from adofai_publisher.ui.main_window import NAV_ITEMS, MainWindow, is_safe_profile_path
 from adofai_publisher.ui.home_page import HomePage
 from adofai_publisher.ui.pages import WorkspacePage
@@ -113,6 +113,64 @@ def test_settings_snippet_hint_points_to_workspace_step_four(tmp_path):
     page.deleteLater()
     app.processEvents()
     assert app is not None
+
+
+def test_settings_page_shows_unsaved_hint_after_edit(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    from adofai_publisher.ui.pages import SettingsPage
+
+    page = SettingsPage(Settings(tmp_path / "settings.json"))
+    try:
+        assert page.dirty_hint.text() == ""
+        assert page.dirty_hint.property("tone") == "warn"
+
+        page.profile_input.setText("D:/tmp/unsaved-profile")
+        assert page.is_dirty()
+        # 防抖约 0.5 秒：等定时器真正触发，而不是直接调私有方法。
+        QTest.qWait(600)
+        assert page.dirty_hint.text() == "有未保存的更改"
+
+        page.save()
+        assert page.dirty_hint.text() == ""
+        assert not page.is_dirty()
+
+        page.tags_input.setText("硬核, 拆谱")
+        QTest.qWait(600)
+        assert page.dirty_hint.text() == "有未保存的更改"
+
+        page.load()
+        assert page.dirty_hint.text() == ""
+        assert not page.is_dirty()
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+
+def test_settings_focus_login_section_scrolls_and_focuses(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    from adofai_publisher.ui.pages import SettingsPage
+
+    page = SettingsPage(Settings(tmp_path / "settings.json"))
+    page.resize(900, 620)
+    page.show()
+    page.windowHandle().requestActivate()
+    app.processEvents()
+    try:
+        area = page._scroll_area
+        area.verticalScrollBar().setValue(0)
+        page.focus_login_section()
+        app.processEvents()
+        card_rect = QRect(
+            page.tool_card.mapTo(area.viewport(), QPoint(0, 0)),
+            page.tool_card.size(),
+        )
+        assert card_rect.intersects(area.viewport().rect())
+        assert area.verticalScrollBar().value() > 0
+        assert page.login_button.hasFocus()
+    finally:
+        page.close()
+        page.deleteLater()
+        app.processEvents()
 
 
 def test_settings_page_obs_defaults_and_collect(tmp_path):
@@ -4355,23 +4413,50 @@ def test_workspace_cover_slots_sync_clear_and_legacy_draft(tmp_path, monkeypatch
     try:
         page.cover_picker.set_file(str(wide))
         assert page.draft.cover_path == str(wide)
+        assert not page.cover_picker.preview.pixmap().isNull()
+        assert page.cover_picker.slot_buttons[
+            CoverPicker.SLOT_PRIMARY
+        ].text().endswith("✓")
+        assert "✓" not in page.cover_picker.slot_buttons[
+            CoverPicker.SLOT_ALTERNATE
+        ].text()
+
+        # 切到未上传的副槽：预览是空状态，不再显示主图裁剪版。
+        page.cover_picker.set_active_slot(CoverPicker.SLOT_ALTERNATE)
+        app.processEvents()
+        assert page.cover_picker.preview.pixmap().isNull()
+        assert "尚未单独上传 4:3 副图" in page.cover_picker.preview.text()
+        assert page.cover_picker.hint.text() == "投稿时会用主图裁剪版补 4:3"
+        assert not page.cover_clear.isEnabled()
+        assert page.cover_sync.isEnabled()
 
         page._sync_cover_ratio()
         assert page.draft.cover_path_43
+        assert "已生成 4:3 副图" in page.cover_status.text()
         saved = QImage(page.draft.cover_path_43)
         assert not saved.isNull()
         assert abs(saved.width() / saved.height() - 4 / 3) < 0.02
         assert page.cover_clear.isEnabled()
+        assert not page.cover_picker.preview.pixmap().isNull()
+        assert "✓" in page.cover_picker.slot_buttons[
+            CoverPicker.SLOT_ALTERNATE
+        ].text()
 
         page.cover_clear.click()
         assert page.draft.cover_path_43 == ""
         assert page.draft.cover_path == str(wide)
+        assert page.cover_status.text() == ""
+        assert page.cover_picker.preview.pixmap().isNull()
+        assert "✓" not in page.cover_picker.slot_buttons[
+            CoverPicker.SLOT_ALTERNATE
+        ].text()
 
         # 旧草稿没有 cover_path_43：载入不报错，两个槽各自回填。
         page.load_draft(Draft(cover_path=str(wide), title="旧草稿"))
         assert page.draft.cover_path == str(wide)
         assert page.draft.cover_path_43 == ""
         assert page.cover_picker.active_slot == CoverPicker.SLOT_PRIMARY
+        assert not page.cover_picker.preview.pixmap().isNull()
     finally:
         page.deleteLater()
         app.processEvents()
@@ -4404,6 +4489,11 @@ def test_history_record_restores_both_cover_slots(tmp_path):
         page.load_draft(restored)
         assert page.cover_picker.path_for(CoverPicker.SLOT_PRIMARY) == str(wide)
         assert page.cover_picker.path_for(CoverPicker.SLOT_ALTERNATE) == str(square)
+        assert not page.cover_picker.preview.pixmap().isNull()
+        page.cover_picker.set_active_slot(CoverPicker.SLOT_ALTERNATE)
+        app.processEvents()
+        assert not page.cover_picker.preview.pixmap().isNull()
+        assert page.cover_picker.hint.text() == square.name
 
         # 旧记录没有 cover_path_43：载入不报错，副槽为空、主图仍在。
         legacy = MainWindow._draft_from_record(
@@ -5008,17 +5098,238 @@ def test_chart_library_filter_rows_do_not_overlap():
         page.curation_button,
         page.tags_button,
         page.reset_button,
+        page.view_combo,
     ):
         button = rect(widget)
         assert not button.intersects(main), widget
         assert button.top() > main.bottom(), widget
-    # 按钮右端与滑块右端对齐。
-    assert abs(rect(page.reset_button).right() - main.right()) <= 1
+    # 行尾的视图切换右端与滑块右端对齐。
+    assert abs(rect(page.view_combo).right() - main.right()) <= 1
+    assert rect(page.reset_button).right() < rect(page.view_combo).left()
     # 压缩之后筛选面板不应该再占两百多像素。
     panel = page.difficulty_slider.parentWidget()
     assert panel.height() <= 110
 
     page.close()
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_chart_library_online_sort_controls_share_filter_row():
+    app = QApplication.instance() or QApplication([])
+    page = ChartLibraryPage()
+    page.resize(1120, 760)
+    page.show()
+    app.processEvents()
+
+    panel = page.difficulty_slider.parentWidget()
+
+    def top(widget) -> QPoint:
+        return widget.mapTo(page, QPoint(0, 0))
+
+    def center_y(widget) -> int:
+        return widget.mapTo(page, widget.rect().center()).y()
+
+    # 排序控件、筛选按钮与视图切换同一行（纵坐标容差 6px）。
+    baseline = center_y(page.special_button)
+    for widget in (page.sort_combo, page.order_button, page.view_combo):
+        assert abs(center_y(widget) - baseline) <= 6, widget
+        assert widget.parentWidget() is panel, widget
+    # 排序控件在左，筛选按钮在右，视图切换在「重置」右侧收尾。
+    assert top(page.order_button).x() < top(page.special_button).x()
+    assert top(page.reset_button).x() + page.reset_button.width() < top(page.view_combo).x()
+    # 合并之后筛选面板没有被撑高。
+    assert panel.height() <= 110
+
+    page.close()
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_chart_library_online_status_row_stays_single_line():
+    app = QApplication.instance() or QApplication([])
+    page = ChartLibraryPage()
+    page.resize(1120, 760)
+    page.show()
+    app.processEvents()
+
+    def top(widget) -> QPoint:
+        return widget.mapTo(page, QPoint(0, 0))
+
+    def center_y(widget) -> int:
+        return widget.mapTo(page, widget.rect().center()).y()
+
+    assert page.online_status.wordWrap() is False
+    # 状态与结果总数共用一行；视图切换已经移到上方筛选行。
+    ys = [center_y(widget) for widget in (page.online_status, page.total_label)]
+    assert max(ys) - min(ys) <= 6, ys
+    assert abs(center_y(page.view_combo) - center_y(page.special_button)) <= 6
+    # 这一行位于筛选面板与结果列表之间。
+    panel_bottom = page.difficulty_slider.parentWidget().geometry().bottom()
+    assert top(page.online_status).y() > panel_bottom
+    assert top(page.online_list).y() > top(page.online_status).y()
+
+    def level(tuf_id: int, song: str) -> dict:
+        return LevelInfo(tuf_id=tuf_id, song=song).to_dict()
+
+    page.set_page(
+        {
+            "request_id": page._request_id,
+            "items": [level(1, "One"), level(2, "Two")],
+            "total": 13973,
+            "offset": 0,
+            "limit": 100,
+            "has_more": True,
+        }
+    )
+    # 成功文案缩短，「继续滚动 / 加载更多」的提示挪到按钮 tooltip。
+    assert page.online_status.text() == "已显示 2 条"
+    assert "继续滚动" not in page.online_status.text()
+    assert "继续滚动" in page.more_button.toolTip()
+    assert "加载更多" in page.more_button.toolTip()
+
+    # 长错误只显示省略号：不撑高状态行，也不挤走同排的结果总数。
+    row_height = page.online_status.height()
+    total_right = top(page.total_label).x() + page.total_label.width()
+    long_message = "筛选数据加载失败：" + "connection reset by peer；" * 30
+    page.set_error(long_message)
+    app.processEvents()
+    assert page.online_status.fullText() == long_message
+    assert page.online_status.toolTip() == long_message
+    assert "…" in page.online_status.text()
+    assert page.online_status.height() == row_height
+    assert page.online_status.width() > 0
+    # 结果总数文案会变短，但它仍然贴在这一行右端，没有被状态行挤开。
+    assert top(page.total_label).x() + page.total_label.width() == total_right
+
+    # 加载中 / 筛选失败等既有文案仍然写入状态行。
+    page._emit_search()
+    assert page.online_status.fullText() == "正在查询 TUF…"
+    page.set_meta_loading()
+    assert page.online_status.fullText() == "正在加载筛选数据…"
+    page.set_meta_error("boom")
+    assert "筛选数据加载失败" in page.online_status.fullText()
+
+    page.close()
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_chart_library_filter_row_fits_minimum_window(tmp_path, monkeypatch):
+    """最小窗口 1080×720 下库页只有约 824px 宽：筛选行不重叠、文字不被硬裁。
+
+    直接 ``page.resize(824, 720)`` 会被页面最小宽度撑回去，测不到真实挤压；
+    这里用真实 MainWindow 缩到最小尺寸再打开在线 TUF 页。
+    """
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    # 打开谱面库页不联网：只关心筛选行布局。
+    monkeypatch.setattr(window, "_ensure_online_browse", lambda: None)
+    monkeypatch.setattr(window, "_refresh_library", lambda: None)
+    window.resize(1080, 720)
+    window.show()
+    window.open_page("library", "online")
+    app.processEvents()
+
+    page = window.library
+    # 真实最小窗口下页面确实被压到 824 左右，而不是被最小宽度撑回 875+。
+    assert page.width() <= 830
+
+    widgets = (
+        page.sort_combo,
+        page.order_button,
+        page.special_button,
+        page.q_button,
+        page.curation_button,
+        page.tags_button,
+        page.reset_button,
+        page.view_combo,
+    )
+
+    def rect(widget) -> QRect:
+        return QRect(widget.mapTo(page, QPoint(0, 0)), widget.size())
+
+    rects = [rect(widget) for widget in widgets]
+    for index, first in enumerate(rects):
+        for second in rects[index + 1 :]:
+            assert not first.intersects(second)
+    # 每个控件都拿到自然宽度：按钮文字完整显示，没有硬裁。
+    for widget in widgets:
+        assert widget.width() >= widget.sizeHint().width(), widget
+    # 这轮验收点：「Curation」的文字区完整放下 104px 文案。
+    curation = page.curation_button
+    text_width = curation.fontMetrics().horizontalAdvance("Curation")
+    chrome = curation.sizeHint().width() - text_width
+    assert curation.width() - chrome >= text_width
+    assert curation._elided_text() == "Curation"
+    assert page.special_button._elided_text() == "特殊难度"
+    # 行尾的视图切换仍在筛选面板内，没有被窗口右缘裁掉，且与滑块右端对齐。
+    panel_rect = rect(page.difficulty_slider.parentWidget())
+    assert panel_rect.contains(rects[-1])
+    slider_rect = rect(page.difficulty_slider)
+    assert abs(rects[-1].right() - slider_rect.right()) <= 1
+    panel = page.difficulty_slider.parentWidget()
+    assert panel.height() <= 110
+    assert page.online_status.width() > 0
+
+    window.close()
+    app.processEvents()
+
+
+def test_filter_menu_button_elides_with_tooltip_when_squeezed():
+    """筛选按钮被挤窄时画省略号，text()/sizeHint 仍按全文，tooltip 给原文。"""
+    app = QApplication.instance() or QApplication([])
+    button = FilterMenuButton("Curation")
+    button.show()
+    app.processEvents()
+
+    natural = button.sizeHint().width()
+    button.resize(80, 34)
+    app.processEvents()
+    assert button.text() == "Curation"
+    assert button._elided_text().endswith("…")
+    assert button.toolTip() == "Curation"
+    # 省略只是绘制层的事：sizeHint 仍按完整文案要宽度，不会被越挤越小。
+    assert button.sizeHint().width() == natural
+    button.grab()
+
+    button.resize(natural, 34)
+    app.processEvents()
+    assert button._elided_text() == "Curation"
+    assert button.toolTip() == ""
+
+    button.resize(80, 34)
+    app.processEvents()
+    button.setToolTip("说明文字")
+    assert button.toolTip() == "说明文字\n\nCuration"
+
+    button.close()
+    button.deleteLater()
+    app.processEvents()
+
+
+def test_chart_library_online_sort_and_view_controls_still_drive_search():
+    app = QApplication.instance() or QApplication([])
+    page = ChartLibraryPage()
+    spy = QSignalSpy(page.searchRequested)
+
+    page.sort_combo.setCurrentIndex(1)
+    assert spy.count() == 1
+    assert spy.at(0)[0]["sort"] == SORT_OPTIONS[1][1]
+
+    page.order_button.click()
+    assert spy.count() == 2
+    assert spy.at(1)[0]["descending"] is False
+    assert page.order_button.text().startswith("↑")
+
+    page.view_combo.setCurrentIndex(1)
+    assert page.online_delegate._compact is True
+    assert page.local_delegate._compact is True
+    page.view_combo.setCurrentIndex(0)
+    assert page.online_delegate._compact is False
+    assert page.local_delegate._compact is False
+
     page.deleteLater()
     app.processEvents()
 
@@ -5341,6 +5652,275 @@ def test_history_page_has_tuf_submission_list_button():
         page.tufListRequested.connect(lambda: fired.append(True))
         page.tuf_list_button.click()
         assert fired == [True]
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+
+def test_top_bar_login_chips_open_settings_login_section(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Settings(tmp_path / "settings.json"))
+    window.show()
+    app.processEvents()
+    called: list[bool] = []
+    monkeypatch.setattr(
+        window.settings_page, "focus_login_section", lambda: called.append(True)
+    )
+    try:
+        for login_chip in (window.bili_chip, window.tuf_chip):
+            assert login_chip.toolTip() == "点击前往设置登录"
+            assert login_chip.cursor().shape() == Qt.CursorShape.PointingHandCursor
+
+        window._navigate("home")
+        QTest.mouseClick(window.tuf_chip, Qt.MouseButton.LeftButton)
+        QTest.qWait(50)
+
+        assert window.stack.currentWidget() is window.settings_page
+        assert called == [True]
+
+        # 已经在设置页时再点芯片：不重新 load()，未保存的修改保留。
+        window.settings_page.profile_input.setText("D:/tmp/keep-me")
+        QTest.mouseClick(window.bili_chip, Qt.MouseButton.LeftButton)
+        QTest.qWait(50)
+        assert window.settings_page.profile_input.text() == "D:/tmp/keep-me"
+        assert called == [True, True]
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_history_page_search_status_and_review_filters():
+    from adofai_publisher.ui.pages import HistoryPage
+
+    app = QApplication.instance() or QApplication([])
+    page = HistoryPage()
+    records = [
+        {
+            "id": "1",
+            "song": "Carnation",
+            "title": "【冰与火之舞】Carnation",
+            "status": "submitted",
+            "bvid": "BV1xx411c7mD",
+            "tuf_record_id": "71967",
+            "review_status": "approved",
+        },
+        {
+            "id": "2",
+            "song": "Plain",
+            "title": "Plain",
+            "status": "failed",
+            "review_status": None,
+        },
+        {
+            "id": "3",
+            "song": "Other",
+            "title": "Other",
+            "status": "bili_only",
+            "review_status": "pending",
+        },
+    ]
+    try:
+        page.set_records(records)
+        assert page.table.rowCount() == 3
+        assert page.count_label.text() == "3 / 3 条记录"
+
+        page.search_input.setText("carnation")
+        assert page.table.rowCount() == 1
+        assert page.table.item(0, 1).text() == "Carnation"
+        assert page.count_label.text() == "1 / 3 条记录"
+
+        page.search_input.setText("BV1xx411c7mD")
+        assert page.table.rowCount() == 1
+        page.search_input.setText("71967")
+        assert page.table.rowCount() == 1
+
+        page.search_input.clear()
+        assert page.table.rowCount() == 3
+        page.status_combo.setCurrentIndex(page.status_combo.findData("failed"))
+        assert page.table.rowCount() == 1
+        assert page.table.item(0, 6).text() == "失败"
+
+        page.status_combo.setCurrentIndex(0)
+        page.review_combo.setCurrentIndex(page.review_combo.findData("pending"))
+        assert page.table.rowCount() == 1
+        assert page.table.item(0, 7).text() == "待处理"
+
+        page.review_combo.setCurrentIndex(page.review_combo.findData("approved"))
+        assert page.table.rowCount() == 1
+        assert page.table.item(0, 1).text() == "Carnation"
+
+        page.review_combo.setCurrentIndex(0)
+        page.search_input.setText("no-such-song")
+        assert page.table.rowCount() == 0
+        assert not page.empty_label.isHidden()
+        assert page.empty_label.text() == "没有符合筛选条件的记录。"
+        assert page.table.isHidden()
+
+        page.search_input.clear()
+        page.set_records([])
+        assert page.count_label.text() == "0 / 0 条记录"
+        assert page.empty_label.text() == "还没有投稿记录。完成一次双投后会出现在这里。"
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+
+def test_history_page_filtered_selection_loads_and_deletes_right_record(monkeypatch):
+    from adofai_publisher.ui import pages as pages_module
+    from adofai_publisher.ui.pages import HistoryPage
+
+    app = QApplication.instance() or QApplication([])
+    page = HistoryPage()
+    records = [
+        {"id": "1", "song": "Carnation", "status": "submitted"},
+        {"id": "2", "song": "Plain", "status": "failed"},
+        {"id": "3", "song": "Other", "status": "failed"},
+    ]
+    try:
+        page.set_records(records)
+        page.status_combo.setCurrentIndex(page.status_combo.findData("failed"))
+        assert page.table.rowCount() == 2
+
+        page.table.selectRow(1)
+        assert page._selected_id() == "3"
+        loaded: list[dict] = []
+        page.loadRequested.connect(loaded.append)
+        page._load_selected()
+        assert [item["id"] for item in loaded] == ["3"]
+
+        page.table.selectRow(0)
+        assert page._selected_id() == "2"
+        deleted: list[str] = []
+        page.deleteRequested.connect(deleted.append)
+        monkeypatch.setattr(
+            pages_module.QMessageBox,
+            "question",
+            staticmethod(
+                lambda *args, **kwargs: pages_module.QMessageBox.StandardButton.Yes
+            ),
+        )
+        page._delete_selected()
+        assert deleted == ["2"]
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+
+def test_history_page_review_and_status_colors_follow_theme():
+    from adofai_publisher.ui.pages import HistoryPage
+    from adofai_publisher.ui.theme import (
+        active_theme,
+        palette,
+        set_active_theme,
+    )
+
+    app = QApplication.instance() or QApplication([])
+    page = HistoryPage()
+    records = [
+        {"id": "1", "song": "A", "status": "submitted", "review_status": "approved"},
+        {"id": "2", "song": "B", "status": "submitted", "review_status": "pending"},
+        {"id": "3", "song": "C", "status": "failed", "review_status": "declined"},
+        {"id": "4", "song": "D", "status": "submitted"},
+    ]
+    previous = active_theme()
+    try:
+        page.set_records(records)
+        colors = palette(previous)
+        assert (
+            page.table.item(0, 7).foreground().color().name()
+            == QColor(colors["success"]).name()
+        )
+        assert (
+            page.table.item(1, 7).foreground().color().name()
+            == QColor(colors["warning"]).name()
+        )
+        assert (
+            page.table.item(2, 7).foreground().color().name()
+            == QColor(colors["danger"]).name()
+        )
+        assert (
+            page.table.item(2, 6).foreground().color().name()
+            == QColor(colors["danger"]).name()
+        )
+        # 未同步审核 / 普通状态：不设自定义前景色，沿用表格默认文字色。
+        assert page.table.item(3, 7).data(Qt.ItemDataRole.ForegroundRole) is None
+        assert page.table.item(0, 6).data(Qt.ItemDataRole.ForegroundRole) is None
+
+        other = "light" if previous == "dark" else "dark"
+        set_active_theme(other)
+        page.refresh_theme()
+        other_colors = palette(other)
+        assert (
+            page.table.item(0, 7).foreground().color().name()
+            == QColor(other_colors["success"]).name()
+        )
+    finally:
+        set_active_theme(previous)
+        page.deleteLater()
+        app.processEvents()
+
+
+def test_history_page_context_menu_actions(monkeypatch):
+    from adofai_publisher.ui import pages as pages_module
+    from adofai_publisher.ui.pages import HistoryPage
+
+    app = QApplication.instance() or QApplication([])
+    page = HistoryPage()
+    records = [
+        {
+            "id": "1",
+            "song": "Carnation",
+            "status": "submitted",
+            "bvid": "BV1xx411c7mD",
+        },
+        {"id": "2", "song": "Plain", "status": "failed"},
+    ]
+    try:
+        page.set_records(records)
+        loaded: list[dict] = []
+        page.loadRequested.connect(loaded.append)
+
+        menu = page._build_row_menu(0)
+        actions = {action.text(): action for action in menu.actions()}
+        assert {
+            "载入到工作台",
+            "复制 BV 号",
+            "打开 B 站视频页",
+            "删除记录",
+        } <= set(actions)
+
+        actions["载入到工作台"].trigger()
+        assert loaded == [records[0]]
+
+        opened: list[str] = []
+        monkeypatch.setattr(
+            "adofai_publisher.ui.pages.QDesktopServices.openUrl",
+            lambda url: opened.append(url.toString()),
+        )
+        actions["打开 B 站视频页"].trigger()
+        assert opened == ["https://www.bilibili.com/video/BV1xx411c7mD"]
+
+        actions["复制 BV 号"].trigger()
+        assert QGuiApplication.clipboard().text() == "BV1xx411c7mD"
+
+        no_bv_menu = page._build_row_menu(1)
+        no_bv = {action.text(): action for action in no_bv_menu.actions()}
+        assert not no_bv["复制 BV 号"].isEnabled()
+        assert not no_bv["打开 B 站视频页"].isEnabled()
+
+        deleted: list[str] = []
+        page.deleteRequested.connect(deleted.append)
+        page.table.selectRow(1)
+        monkeypatch.setattr(
+            pages_module.QMessageBox,
+            "question",
+            staticmethod(
+                lambda *args, **kwargs: pages_module.QMessageBox.StandardButton.Yes
+            ),
+        )
+        no_bv["删除记录"].trigger()
+        assert deleted == ["2"]
     finally:
         page.deleteLater()
         app.processEvents()
