@@ -1,7 +1,7 @@
 """仓库根 ``run.cmd`` 启动入口的测试。
 
 只测 ``--print-command``：它打印最终会执行的命令后立即退出，不启动 GUI，
-因此可以在 pytest 里安全运行。真实 GUI 启动由 DC 手动验收。
+因此可以在 pytest 里安全运行。真实 GUI 启动由人工手动验收。
 """
 
 from __future__ import annotations

@@ -31,7 +31,7 @@ a = Analysis(
 
 
 def _drop_tool_runtime_payload(entries):
-    """避免把 Codex/文档工具链里的 DLL 误当成应用依赖。"""
+    """避免把本地工具链缓存里的 DLL 误当成应用依赖。"""
     markers = (
         "\\.cache\\codex-runtimes\\",
         "\\poppler\\",

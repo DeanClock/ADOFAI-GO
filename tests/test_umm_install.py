@@ -18,15 +18,10 @@ from adofai_publisher.umm import (
     uninstall_umm,
 )
 
-# 真实官方 UMM 0.33.3 安装包（默认本机 Downloads 里的那份，可用环境变量覆盖）。
-# 缺失时对应测试跳过，套件本身不依赖这台机器的路径。
-REAL_UMM_0333_ARCHIVE = Path(
-    os.environ.get(
-        "UMM_0333_ARCHIVE",
-        r"C:\Users\DeanClock\Downloads"
-        r"\UnityModManager 21 0.33.3 2026-10-28T12-01Z 8HMONKGQW.zip",
-    )
-)
+# 真实官方 UMM 0.33.3 安装包的路径由环境变量 UMM_0333_ARCHIVE 提供；
+# 未设置或文件缺失时对应测试跳过，套件本身不依赖任何本机路径。
+_UMM_0333_ARCHIVE_ENV = os.environ.get("UMM_0333_ARCHIVE", "")
+REAL_UMM_0333_ARCHIVE = Path(_UMM_0333_ARCHIVE_ENV) if _UMM_0333_ARCHIVE_ENV else Path()
 
 
 def _game_dir(tmp_path: Path) -> Path:
@@ -467,7 +462,7 @@ def test_fork_install_keeps_legacy_root_layout(fork_environment):
 def test_official_install_converts_existing_fork_config(environment):
     """旧安装留下的 fork 配置（只有 Rel）装官方 0.33.x 时必须转成 ModsDirectory。
 
-    这是测试者遇到的崩溃：0.33.3 读不到 ModsDirectory 时
+    这是曾遇到的崩溃：0.33.3 读不到 ModsDirectory 时
     Path.Combine(cwd, null) 抛 ArgumentNullException，游戏启动即崩。
     """
     game, _installer, settings = environment
@@ -941,7 +936,7 @@ def test_install_umm_reports_when_download_creates_no_installer(tmp_path, monkey
 
 @pytest.mark.skipif(
     not REAL_UMM_0333_ARCHIVE.is_file(),
-    reason=f"本机没有真实 UMM 0.33.3 安装包：{REAL_UMM_0333_ARCHIVE}",
+    reason="本机没有真实 UMM 0.33.3 安装包：请设置 UMM_0333_ARCHIVE 后运行",
 )
 def test_install_real_umm_0333_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))

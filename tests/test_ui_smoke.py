@@ -219,11 +219,11 @@ def test_settings_page_obs_recording_state_and_path(tmp_path):
 
     opened: list[str] = []
     page.obsOpenFolderRequested.connect(opened.append)
-    page.set_obs_output_path(r"C:\Users\DeanClock\Videos\recording.mp4")
+    page.set_obs_output_path(r"C:\Users\demo\Videos\recording.mp4")
     assert "recording.mp4" in page.obs_path.text()
     assert page.obs_open_button.isEnabled()
     page.obs_open_button.click()
-    assert opened == [r"C:\Users\DeanClock\Videos"]
+    assert opened == [r"C:\Users\demo\Videos"]
 
     page.close()
     page.deleteLater()
@@ -1097,7 +1097,7 @@ def test_home_greeting_does_not_hardcode_author_name():
 
     greeting = _greeting()
     assert greeting
-    assert "DC" not in greeting
+    assert "DeanClock" not in greeting
 
 
 def test_home_page_guide_launch_button_order_and_signal():

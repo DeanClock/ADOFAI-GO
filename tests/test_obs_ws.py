@@ -296,11 +296,11 @@ def test_stop_record_queries_status_for_output_path(qapp):
         True,
         {
             "outputActive": False,
-            "outputPath": r"C:\Users\DeanClock\Videos\recording.mp4",
+            "outputPath": r"C:\Users\demo\Videos\recording.mp4",
         },
     )
 
-    assert stopped == [r"C:\Users\DeanClock\Videos\recording.mp4"]
+    assert stopped == [r"C:\Users\demo\Videos\recording.mp4"]
     client.close()
 
 

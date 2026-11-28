@@ -52,7 +52,7 @@ def test_hit_count_excludes_early_and_late_double():
 
 
 def test_hit_count_matches_dc_screenshot_case():
-    # DC 实测：完美 1195、稍快 25、稍慢 36、太快 9、太慢 8 → 1273
+    # 实测：完美 1195、稍快 25、稍慢 36、太快 9、太慢 8 → 1273
     values = _values(perfect=1195, ePerfect=25, lPerfect=36, earlySingle=9, lateSingle=8)
     assert judgement_sum(values) == 1273
     assert judgement_hit_count(values) == 1273

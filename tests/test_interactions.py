@@ -316,7 +316,7 @@ def test_wheel_over_unfocused_spin_scrolls_page_not_value(app):
 
 
 def test_wheel_over_focused_spin_still_scrolls_page_not_value(app, monkeypatch):
-    """DC 定的规则：点过/已聚焦的数值框也不能被滚轮改值。"""
+    """约定规则：点过/已聚焦的数值框也不能被滚轮改值。"""
     area, spin = _scroll_host(app, lambda: QSpinBox())
     spin.setRange(0, 999)
     spin.setValue(120)
@@ -537,7 +537,7 @@ def test_cover_picker_keeps_two_slots_and_syncs_cropped_image(app, tmp_path):
 
         synced = picker.sync_image()
         assert not synced.isNull()
-        # 主图是 16:9，副图按 DC 定的 4:3 裁剪，且只裁不缩放。
+        # 主图是 16:9，副图按约定的 4:3 裁剪，且只裁不缩放。
         assert abs(synced.width() / synced.height() - 4 / 3) < 0.02
         assert synced.height() == 200, "裁剪不应缩放源图"
 
@@ -1098,7 +1098,7 @@ def test_judgement_grid_counts_label_uses_two_tuf_measures(app):
 
     grid = JudgementGrid()
     try:
-        # DC 实测那组：九格和 1273，打击数 1273。
+        # 实测那组：九格和 1273，打击数 1273。
         grid.set_values(
             {
                 "perfect": 1195,

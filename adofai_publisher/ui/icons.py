@@ -96,7 +96,7 @@ def _path(name: str) -> QPainterPath:
             left + radius, top,
         )
         path.closeSubpath()
-    else:  # settings：齿轮（以前和「模组」共用滑杆造型，DC 反馈后改掉）
+    else:  # settings：齿轮（以前和「模组」共用滑杆造型，后来改掉）
         center = QPointF(9, 9)
         path.addEllipse(center, 4.4, 4.4)
         path.addEllipse(center, 1.8, 1.8)

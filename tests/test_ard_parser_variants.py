@@ -276,7 +276,7 @@ def test_autoplay_tiles_inactive_disable_does_not_close_open_range(tmp_path):
 
 
 def test_autoplay_tiles_inactive_event_matches_reported_level(tmp_path):
-    # 对应 DC 实报的 Bismuth (729).zip：3,355 格、12 中旋、自动砖 0、可击 3,343。
+    # 对应实报的 Bismuth (729).zip：3,355 格、12 中旋、自动砖 0、可击 3,343。
     path = _write(
         tmp_path / "bismuth_like.adofai",
         {

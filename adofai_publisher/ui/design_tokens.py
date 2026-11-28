@@ -3,7 +3,7 @@
 这里只放纯数据：语义色、尺寸、间距、字号、动效时长。
 不导入 Qt，不依赖任何运行环境，方便测试与其他 UI 模块直接引用。
 
-配色方向（DC 已确认）：Claude 风格——暖灰纸感、陶土橙强调、
+配色方向：暖灰纸感、陶土橙强调、
 粗字重标题、1px 细边框、大留白。浅色与深色各一套。
 """
 
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 # 字体族：QSS 片段与 QFont 共用的字符串。
 SANS_FAMILY = '"Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif'
-# 标题字族：DC 反馈「标题字太弱」。系统自带微软雅黑 Bold（msyhbd.ttc），
+# 标题字族：标题需要更强的字重。系统自带微软雅黑 Bold（msyhbd.ttc），
 # 不打包字体文件、不新增依赖；正文仍用 SANS_FAMILY。
 TITLE_FAMILY = '"Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif'
 # 旧衬线标题字族保留导出，避免外部脚本导入失败；主题已不再使用。

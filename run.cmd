@@ -29,7 +29,7 @@ set "__PYVENV_LAUNCHER__="
 set "PYTHONHOME="
 
 rem --- 1) Prefer a .venv that imports PySide6. ---
-rem 仓库根的 .venv 优先；在 .claude\worktrees\<名字> 里运行时退到仓库根的 .venv。
+rem 仓库根的 .venv 优先；在 worktree 里运行时退到仓库根的 .venv。
 set "VENV_DIR="
 if exist "%ROOT%\.venv\Scripts\python.exe" set "VENV_DIR=%ROOT%\.venv"
 if not defined VENV_DIR if exist "%ROOT%\..\..\..\.venv\Scripts\python.exe" (

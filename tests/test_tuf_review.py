@@ -451,7 +451,7 @@ def test_match_accepts_submission_id_when_record_stores_it():
 
 
 def _real_list_item(**overrides):
-    """DC 实测的扁平列表结构：没有 pass/level 子对象。"""
+    """实测的扁平列表结构：没有 pass/level 子对象。"""
 
     payload = {
         "kind": "pass",

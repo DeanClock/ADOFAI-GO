@@ -1,6 +1,6 @@
 """主窗口位置保存 / 恢复的测试。
 
-重点是测试者那台「显示器 1 在上、显示器 2 在下」的纵向布局：窗口贴着下面
+重点是「显示器 1 在上、显示器 2 在下」的纵向双屏布局：窗口贴着下面
 那块屏的底边关闭后，重启必须仍然出现在下面那块屏里；保存的位置彻底跑到屏
 幕外时，要安全地回落到主屏居中。
 """
@@ -22,7 +22,7 @@ from adofai_publisher.ui.window_placement import (
     title_bar_visible,
 )
 
-# 测试者的真实布局：显示器 1 在上（y 为负数），显示器 2 在下，主屏是上面的 1。
+# 纵向双屏布局示例：显示器 1 在上（y 为负数），显示器 2 在下，主屏是上面的 1。
 TOP_SCREEN = Rect(0, -1080, 1920, 1080)
 BOTTOM_SCREEN = Rect(0, 0, 1920, 1080)
 
@@ -196,7 +196,7 @@ def test_main_window_restores_saved_rect_and_saves_state_on_close(tmp_path, monk
 
     window = MainWindow(settings)
     try:
-        # 真实机器只有一块屏，这里换成测试者的纵向布局。
+        # 真实机器只有一块屏，这里换成纵向双屏布局。
         monkeypatch.setattr(window, "_screen_rects", lambda: ([TOP_SCREEN, BOTTOM_SCREEN], 0))
         window._restore_window_geometry()
         geometry = window.geometry()

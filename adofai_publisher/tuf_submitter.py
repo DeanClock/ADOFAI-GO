@@ -488,7 +488,7 @@ class TufClient:
             payload.update(extra)
 
         if log is not None:
-            # 提交前给 DC 一行摘要，方便投完直接对照 TUF 记录。
+            # 提交前输出一行摘要，方便投完直接对照 TUF 记录。
             # 只含判定数字与版本，不含 Cookie、玩家名或完整 JSON。
             try:
                 log(
@@ -622,7 +622,7 @@ def format_judgement_summary(
     adofai_version: str = DEFAULT_ADOFIA_VERSION,
     is_x_perfect: Any = None,
 ) -> str:
-    """给 DC 核对的判定摘要：提交日志与提交确认弹窗共用这一份格式。
+    """供用户核对的判定摘要：提交日志与提交确认弹窗共用这一份格式。
 
     数值取自最终判定值（已含中旋调整）；只含判定数字与游戏版本，不含
     Cookie、玩家信息或完整 JSON。

@@ -203,7 +203,7 @@ def test_app_root_uses_warm_gradient():
 
 
 def test_titles_use_bold_title_family():
-    """DC 反馈标题字太弱：标题统一走微软雅黑 Bold，不再用衬线。"""
+    """标题字太弱的反馈：标题统一走微软雅黑 Bold，不再用衬线。"""
     from adofai_publisher.ui.design_tokens import TITLE_FAMILY
 
     assert "Microsoft YaHei" in TITLE_FAMILY

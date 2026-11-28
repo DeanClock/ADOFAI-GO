@@ -10,7 +10,7 @@ def test_parse_tuf_payload():
         "levelLengthInMs": 102338.54,
         "tilecount": 1242,
         "autoTileCount": 2,
-        "videoLink": "https://www.bilibili.com/video/BV1Ld4J6DEzN",
+        "videoLink": "https://www.bilibili.com/video/BV1xx411c7mD",
         "baseScore": 0,
         "difficulty": {"name": "Unranked", "baseScore": 0},
         "artists": [{"name": "Kuro Games"}],
