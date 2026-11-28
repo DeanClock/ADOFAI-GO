@@ -5,6 +5,13 @@ ADOFAI GO 各版本更新记录，最新版本在最上面。历史条目保留�
 
 ---
 
+## v0.17.23
+
+- **作者署名统一为 DeanClock**：应用「关于」页、Bridge Mod 的 `Info.json`、构建版本信息、LICENSE、README 与 CHANGELOG 的署名统一为 DeanClock。
+- **公开测试基础设施**：新增 GitHub Actions（Windows / Python 3.11）自动跑全量测试；新增 `THIRD_PARTY_NOTICES.md` 与 `licenses/`（含 PySide6 / Qt 的 LGPLv3 完整说明）；依赖改为精确锁定版本。
+- 文档同步：README 界面预览更新为当前版本截图，使用指南与开发指南拆分到 `docs/`。
+- 自动化测试 1363 项通过（1 项跳过）。
+
 ## v0.17.22
 
 - **在线 TUF / 谱面库更紧凑**：「排序 + 升/降序」并入筛选行，「已显示 N 条」并入结果数一行，
