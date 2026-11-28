@@ -7,7 +7,7 @@
 给《冰与火之舞》（A Dance of Fire and Ice）UP 主用的本地投稿工作台：
 录完视频只填一次信息，工具负责生成 B 站文案、上传 B 站、抓取 BV 号，再把通关记录提交到 TUF 论坛。
 
-**v0.17.23 Beta** · Windows 10/11 · Python 3.11+ / PySide6 · MIT
+**v0.17.24 Beta** · Windows 10/11 · Python 3.11+ / PySide6 · MIT
 
 [**下载最新版**](https://github.com/DeanClock/ADOFAI-GO/releases/latest) ·
 [快速开始](#quickstart) ·

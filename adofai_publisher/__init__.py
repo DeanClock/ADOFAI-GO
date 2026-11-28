@@ -1,3 +1,3 @@
 """ADOFAI GO。"""
 
-__version__ = "0.17.23"
+__version__ = "0.17.24"

@@ -149,7 +149,7 @@ v0.17.22 时全量 1363 项通过、1 项跳过。测试覆盖：
 .\build.ps1
 ```
 
-或：
+手工调试时也可以直接调用 PyInstaller（**不会**写入 Windows 文件版本信息，也不会生成版本副本与 `.sha256`；正式出包请用 `build.ps1`）：
 
 ```powershell
 python -m PyInstaller --noconfirm --clean build.spec
