@@ -119,7 +119,7 @@ python run.py --page styleguide    # 隐藏样张页，集中展示全部控件�
 python -m pytest -q
 ```
 
-v0.17.22 时全量 1363 项通过、1 项跳过。测试覆盖：
+v0.17.25 时全量测试全部通过（含 1–2 项按本机资源自动跳过的用例）。测试覆盖：
 
 - 9 项判定权重、精准度公式与 TUF 判定字段映射
 - 标题/简介/标签/物量合规校验
@@ -188,6 +188,7 @@ dist\ADOFAI GO.exe --selftest
 - 截图和示例数据使用假账号、假 BV 号。
 - 推送与 PR 会由 [GitHub Actions](../.github/workflows/tests.yml) 在 `windows-latest` / Python 3.11 上自动跑 `python -m pytest -q`，合并前确认 CI 通过。
 - 运行 `python -m pytest -q`、`python -m pip_audit`、`python -m bandit -r adofai_publisher -ll`。
+- 真实 UMM 0.33.3 安装包的端到端用例默认跳过；本机要跑的话，把安装包路径设进环境变量 `UMM_0333_ARCHIVE`（例如 `$env:UMM_0333_ARCHIVE = "D:\下载\UnityModManager.zip"`）后再执行 pytest。
 - 依赖使用 `requirements.txt` / `requirements-dev.txt` 管理（v0.17.22 起为精确锁定版本），发布前审查升级。
 - 分发 zip 必须带 `THIRD_PARTY_NOTICES.md` 与 `licenses/` 目录，许可证全文不可省略；升级依赖时同步更新两者。
 - 发布的 exe 提供 SHA256；有条件时进行代码签名。

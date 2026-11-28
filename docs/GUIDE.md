@@ -129,8 +129,9 @@ python run.py --page umm
 
 ### 直接运行 exe
 
-从 [Releases](https://github.com/DeanClock/ADOFAI-GO/releases/latest) 下载的便携版是 onefile 单文件，双击即可；
-首次启动会解压运行库，比源码运行慢几秒。便携版第一次启动会在 exe 同目录生成 `ADOFAI GO 数据\`。
+从 [Releases](https://github.com/DeanClock/ADOFAI-GO/releases/latest) 下载的 exe 是 onefile 单文件，双击即可；
+首次启动会解压运行库，比源码运行慢几秒。默认数据目录是 `%APPDATA%\AdofaiTufBridge\`；
+只有在 exe 同目录放了 `portable.txt` 时（分发 zip 自带该文件），才会改用 exe 旁的 `ADOFAI GO 数据\`。
 
 自己打包的产物：
 
