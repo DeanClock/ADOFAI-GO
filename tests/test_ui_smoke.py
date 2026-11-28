@@ -1581,6 +1581,26 @@ def test_umm_page_saves_hotkey_and_install_preference(tmp_path, monkeypatch):
     app.processEvents()
 
 
+def test_umm_page_hydrates_saved_game_dir_on_init(tmp_path, monkeypatch):
+    """构造页面时就回填已保存的游戏目录，不依赖 refresh() 或本机 Steam 探测。"""
+    monkeypatch.setenv("ADOFAI_TUF_HOME", str(tmp_path))
+    app = QApplication.instance() or QApplication([])
+    game = tmp_path / "game"
+    game.mkdir()
+    settings = Settings(tmp_path / "settings.json")
+    settings.set("umm_game_dir", str(game))
+    from adofai_publisher.ui.umm_page import UmmPage
+
+    page = UmmPage(settings)
+
+    assert page.dir_input.text() == str(game)
+    assert page._read_dir() == str(game)
+
+    page.close()
+    page.deleteLater()
+    app.processEvents()
+
+
 def test_umm_page_install_requests_worker_without_calling_backend(
     tmp_path, monkeypatch
 ):
@@ -1589,6 +1609,8 @@ def test_umm_page_install_requests_worker_without_calling_backend(
     settings = Settings(tmp_path / "settings.json")
     (tmp_path / "game").mkdir()
     settings.set("umm_game_dir", str(tmp_path / "game"))
+    # 不依赖本机 Steam 探测：游戏目录只能来自设置。
+    monkeypatch.setattr("adofai_publisher.ui.umm_page.default_game_dir", lambda: None)
     # 已有安装器：一键安装直接派发安装动作，不进入下载流程。
     monkeypatch.setattr(
         "adofai_publisher.ui.umm_page.umm_installer_source",
@@ -1654,6 +1676,7 @@ def test_umm_page_install_without_installer_downloads_then_installs(
     game.mkdir()
     settings = Settings(tmp_path / "settings.json")
     settings.set("umm_game_dir", str(game))
+    monkeypatch.setattr("adofai_publisher.ui.umm_page.default_game_dir", lambda: None)
     monkeypatch.setattr(
         "adofai_publisher.ui.umm_page.umm_installer_source",
         lambda *_args, **_kwargs: None,
@@ -1717,6 +1740,7 @@ def test_umm_page_install_download_failure_falls_back_to_thunderstore(
     game.mkdir()
     settings = Settings(tmp_path / "settings.json")
     settings.set("umm_game_dir", str(game))
+    monkeypatch.setattr("adofai_publisher.ui.umm_page.default_game_dir", lambda: None)
     monkeypatch.setattr(
         "adofai_publisher.ui.umm_page.umm_installer_source",
         lambda *_args, **_kwargs: None,
