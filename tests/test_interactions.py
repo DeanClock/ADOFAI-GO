@@ -662,6 +662,78 @@ def test_cover_picker_resize_does_not_grow_through_pixmap_sizehint(app, tmp_path
         app.processEvents()
 
 
+def test_cover_picker_height_ignores_scrollbar_sized_width_changes(app, tmp_path):
+    """滚动条出现/消失只改变一条滚动条的宽度，预览高度必须保持不动。"""
+    primary = _make_image(tmp_path / "wide_scroll.png", 1920, 1080)
+    picker = CoverPicker()
+    picker.resize(600, 520)
+    picker.show()
+    app.processEvents()
+    try:
+        picker.set_file(primary)
+        for _ in range(3):
+            app.processEvents()
+        settled = picker.preview.minimumHeight()
+        # 模拟滚动条出现：宽度缩小一条滚动条的量，小于高度死区。
+        picker.resize(picker.width() - 16, picker.height())
+        for _ in range(4):
+            app.processEvents()
+        assert (
+            picker.preview.minimumHeight() == settled
+        ), "滚动条级别的宽度变化不应改预览高度"
+        # 真正缩放窗口时高度跟随，并且收敛。
+        picker.resize(420, picker.height())
+        for _ in range(4):
+            app.processEvents()
+        shrunk = picker.preview.minimumHeight()
+        for _ in range(3):
+            app.processEvents()
+        assert picker.preview.minimumHeight() == shrunk
+        assert shrunk < settled
+    finally:
+        picker.close()
+        picker.deleteLater()
+        app.processEvents()
+
+
+def test_cover_picker_converges_across_scrollbar_thresholds(app, tmp_path):
+    """在 QScrollArea 里连续扫窗口宽度（会跨过滚动条阈值），布局必须收敛。"""
+    primary = _make_image(tmp_path / "wide_sweep.png", 1920, 1080)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    picker = CoverPicker()
+    layout.addWidget(picker)
+    layout.addStretch(1)
+    scroll.setWidget(host)
+    scroll.resize(640, 420)
+    scroll.show()
+    app.processEvents()
+    try:
+        picker.set_file(primary)
+        heights = []
+        for width in range(360, 900, 9):
+            scroll.resize(width, 420)
+            for _ in range(2):
+                app.processEvents()
+            first = picker.preview.minimumHeight()
+            for _ in range(3):
+                app.processEvents()
+            second = picker.preview.minimumHeight()
+            assert first == second, f"宽度 {width} 时预览高度未收敛：{first} → {second}"
+            heights.append(second)
+        assert heights
+        assert max(heights) <= CoverPicker.PREVIEW_MAX_HEIGHT
+        assert min(heights) >= CoverPicker.PREVIEW_MIN_HEIGHT
+        # 死区生效：不是每个宽度台阶都要改高度。
+        assert len(set(heights)) < len(heights)
+    finally:
+        scroll.close()
+        scroll.deleteLater()
+        app.processEvents()
+
+
 def test_copy_preview_cover_label_ignores_pixmap_sizehint(app, tmp_path):
     """工作台第 4 步的封面预览同样不能把 pixmap 的 sizeHint 反馈给布局。"""
     from adofai_publisher.models import Draft

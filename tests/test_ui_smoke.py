@@ -1097,7 +1097,8 @@ def test_home_greeting_does_not_hardcode_author_name():
 
     greeting = _greeting()
     assert greeting
-    assert "DeanClock" not in greeting
+    # 问候语只能是按时段的三句之一，不能混入姓名或内部简称。
+    assert greeting in {"早上好，欢迎回来", "下午好，欢迎回来", "晚上好，欢迎回来"}
 
 
 def test_home_page_guide_launch_button_order_and_signal():

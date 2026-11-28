@@ -584,6 +584,9 @@ class CoverPicker(QFrame):
     PREVIEW_RATIO = (4, 3)
     PREVIEW_MIN_HEIGHT = 140
     PREVIEW_MAX_HEIGHT = 420
+    # 宽度死区：滚动条出现/消失只会让预览宽度变化约一条滚动条的宽度。
+    # 小于这个死区就不改高度，切断「宽→高→滚动条→宽」的循环。
+    PREVIEW_HEIGHT_DEADBAND = 24
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -599,6 +602,8 @@ class CoverPicker(QFrame):
         self._sync_callback: Callable[[str, QImage], None] | None = None
         # resizeEvent → setPixmap 会再次触发布局；重入直接返回，避免无限递归。
         self._rendering = False
+        # 上一次调整预览高度时的宽度，用于高度死区判断。
+        self._preview_height_width = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
@@ -806,8 +811,23 @@ class CoverPicker(QFrame):
 
     def _apply_preview_height(self) -> None:
         target = self._preview_target_size()
-        if target.isValid() and self.preview.minimumHeight() != target.height():
-            self.preview.setMinimumHeight(target.height())
+        if not target.isValid():
+            return
+        height = target.height()
+        width = self.preview.width()
+        if self.preview.minimumHeight() == height:
+            self._preview_height_width = width
+            return
+        # 高度由宽度推导，而设置高度又会触发布局：若宽度只变化了一条滚动条
+        # 的宽度，就不跟——否则滚动条出现→宽度变小→高度变小→滚动条消失……
+        # 会在阈值附近反复抖动，极端情况递归到爆栈。死区必须大于滚动条宽度。
+        if (
+            self._preview_height_width
+            and abs(width - self._preview_height_width) < self.PREVIEW_HEIGHT_DEADBAND
+        ):
+            return
+        self.preview.setMinimumHeight(height)
+        self._preview_height_width = width
 
     def _render(self) -> None:
         # setPixmap / setMinimumHeight 会同步触发布局与新的 resizeEvent；
