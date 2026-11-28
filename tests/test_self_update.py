@@ -432,7 +432,21 @@ def test_install_helper_replaces_dummy_exe_and_keeps_backup(tmp_path, monkeypatc
     )
     completed = _run_helper_sync(args)
 
-    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    if completed.returncode != 0:
+        log_index = args.index("-LogPath") + 1
+        log_path = Path(args[log_index])
+        log_text = (
+            log_path.read_text(encoding="utf-8", errors="replace")
+            if log_path.is_file()
+            else "<helper log missing>"
+        )
+        raise AssertionError(
+            "helper failed\n"
+            f"returncode={completed.returncode}\n"
+            f"stdout={completed.stdout.decode(errors='replace')}\n"
+            f"stderr={completed.stderr.decode(errors='replace')}\n"
+            f"log:\n{log_text}"
+        )
     assert target.read_bytes() == new_data
     assert (tmp_path / "target.exe.old").read_bytes() == b"OLD BUILD"
     assert not new_file.exists()

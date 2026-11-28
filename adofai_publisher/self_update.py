@@ -444,7 +444,8 @@ try {
     Write-UpdateLog "update installed successfully"
     exit 0
 } catch {
-    Write-UpdateLog ("install failed: " + $_.Exception.Message)
+    Write-UpdateLog ("install failed: " + $_.Exception.GetType().FullName + ": " + $_.Exception.Message)
+    Write-UpdateLog ("at: " + $_.ScriptStackTrace)
     if ($hadBackup) {
         try {
             Copy-Item -LiteralPath $backupPath -Destination $TargetPath -Force
