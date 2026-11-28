@@ -24,7 +24,6 @@ jobs:
       QT_QPA_PLATFORM: offscreen
       ADOFAI_NO_AUTOLOGIN: '1'
       PYTHONIOENCODING: utf-8
-      ADOFAI_TUF_HOME: ${{ runner.temp }}/tuf-home
     steps:
       - name: 检出代码
         uses: actions/checkout@v5
@@ -40,10 +39,14 @@ jobs:
 
       - name: 创建测试数据目录
         shell: pwsh
+        env:
+          ADOFAI_TUF_HOME: ${{ runner.temp }}/tuf-home
         run: New-Item -ItemType Directory -Force -Path "$env:ADOFAI_TUF_HOME" | Out-Null
 
       - name: 安装依赖
         run: python -m pip install -r requirements-dev.txt
 
       - name: 运行测试
+        env:
+          ADOFAI_TUF_HOME: ${{ runner.temp }}/tuf-home
         run: python -m pytest -q
