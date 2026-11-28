@@ -3,7 +3,7 @@
 ADOFAI GO 本体采用 **MIT** 许可证，全文见 [LICENSE](LICENSE)。
 本项目依赖并分发下列第三方组件；它们在 `licenses/` 目录下的许可证全文随源码与发行包一同提供。
 
-组件版本为 v0.17.24（2026-11-28）实测锁定，与 [requirements.txt](requirements.txt)、[requirements-dev.txt](requirements-dev.txt) 一致。
+组件版本为 v0.17.25（2026-11-28）实测锁定，与 [requirements.txt](requirements.txt)、[requirements-dev.txt](requirements-dev.txt) 一致。
 
 ## 运行时组件（随 exe 分发）
 
@@ -16,6 +16,9 @@ ADOFAI GO 本体采用 **MIT** 许可证，全文见 [LICENSE](LICENSE)。
 | Node.js（Playwright driver 内置） | 26.13.1 | MIT（附其内置组件声明） | Playwright 驱动运行时 |
 | [greenlet](https://pypi.org/project/greenlet/) | 3.5.6 | MIT | Playwright 同步运行时 |
 | [typing_extensions](https://pypi.org/project/typing-extensions/) | 4.16.0 | PSF-2.0 | 类型标注兼容层 |
+| [setuptools](https://pypi.org/project/setuptools/) | 84.2.1 | MIT | PyInstaller 打包钩子的运行时依赖 |
+| [packaging](https://pypi.org/project/packaging/) | 26.3 | Apache-2.0 OR BSD-2-Clause | 版本与元数据解析 |
+| Microsoft Visual C++ 运行库（MSVCP140 / VCRUNTIME140） | 随 Python 3.11 分发 | Microsoft 可再发行组件许可 | C 运行时 |
 | [requests](https://pypi.org/project/requests/) | 2.34.2 | Apache-2.0 | HTTP 请求 |
 | [urllib3](https://pypi.org/project/urllib3/) | 2.8.0 | MIT | requests 的传输层 |
 | [certifi](https://pypi.org/project/certifi/) | 2026.10.23 | MPL-2.0 | CA 根证书包 |
@@ -33,6 +36,7 @@ PyInstaller 的 GPL 只作用于其引导器（bootloader），其许可证附�
 | 组件 | 版本 | 许可证 |
 | --- | --- | --- |
 | [pytest](https://pypi.org/project/pytest/) | 9.2.0 | MIT |
+| [pytest-timeout](https://pypi.org/project/pytest-timeout/) | 2.4.0 | MIT |
 | [bandit](https://pypi.org/project/bandit/) | 1.9.4 | Apache-2.0 |
 | [pip-audit](https://pypi.org/project/pip-audit/) | >=2.7 | Apache-2.0 |
 
@@ -51,13 +55,21 @@ PyInstaller 的 GPL 只作用于其引导器（bootloader），其许可证附�
 | [node-LICENSE.txt](licenses/node-LICENSE.txt) | MIT（Node.js 及其内置组件声明） | Node.js（Playwright driver） |
 | [greenlet-LICENSE.txt](licenses/greenlet-LICENSE.txt) | MIT | greenlet |
 | [typing_extensions-LICENSE.txt](licenses/typing_extensions-LICENSE.txt) | PSF-2.0 | typing_extensions |
+| [setuptools-LICENSE.txt](licenses/setuptools-LICENSE.txt) | MIT | setuptools |
+| [packaging-LICENSE.txt](licenses/packaging-LICENSE.txt)、[APACHE](licenses/packaging-LICENSE.APACHE.txt)、[BSD](licenses/packaging-LICENSE.BSD.txt) | Apache-2.0 OR BSD-2-Clause | packaging |
+| [pytest-timeout-LICENSE.txt](licenses/pytest-timeout-LICENSE.txt) | MIT | pytest-timeout（仅开发） |
+| [MPL-2.0.txt](licenses/MPL-2.0.txt) | Mozilla Public License 2.0 | certifi |
 | [PSF-2.0.txt](licenses/PSF-2.0.txt) | Python Software Foundation License 2.0 | Python 3.11、typing_extensions |
 | [urllib3-LICENSE.txt](licenses/urllib3-LICENSE.txt) | MIT | urllib3 |
 | [charset-normalizer-LICENSE.txt](licenses/charset-normalizer-LICENSE.txt) | MIT | charset-normalizer |
 | [idna-LICENSE.txt](licenses/idna-LICENSE.txt) | BSD-3-Clause | idna |
-| [certifi-LICENSE.txt](licenses/certifi-LICENSE.txt) | MPL-2.0 声明（正文见 <https://mozilla.org/MPL/2.0/>） | certifi |
+| [certifi-LICENSE.txt](licenses/certifi-LICENSE.txt) | MPL-2.0 声明（全文见 [MPL-2.0.txt](licenses/MPL-2.0.txt)） | certifi |
 | [pyinstaller-COPYING.txt](licenses/pyinstaller-COPYING.txt) | GPL-2.0-or-later + 引导器例外 | PyInstaller |
 | [LicenseRef-Qt-Commercial.txt](licenses/LicenseRef-Qt-Commercial.txt) | Qt 商业许可引用 | 仅作说明，本项目不使用商业许可 |
+
+> 说明：libffi 与 Mesa（`opengl32sw.dll`）以 MIT 发布，随 Python 3.11 / Qt 6.12 分发、未做修改，
+> 完整文本见上游仓库（<https://github.com/libffi/libffi>、<https://www.mesa3d.org/>）。
+> Playwright 内置 npm 组件的逐文件许可清单位于其 driver 包的 `lib/*.js.LICENSE` sidecar 文件，随 exe 一并分发。
 
 ## PySide6 / Qt 的 LGPLv3 说明
 
