@@ -3,7 +3,7 @@
 ADOFAI GO 本体采用 **MIT** 许可证，全文见 [LICENSE](LICENSE)。
 本项目依赖并分发下列第三方组件；它们在 `licenses/` 目录下的许可证全文随源码与发行包一同提供。
 
-组件版本为 v0.17.22（2026-11-28）实测锁定，与 [requirements.txt](requirements.txt)、[requirements-dev.txt](requirements-dev.txt) 一致。
+组件版本为 v0.17.24（2026-11-28）实测锁定，与 [requirements.txt](requirements.txt)、[requirements-dev.txt](requirements-dev.txt) 一致。
 
 ## 运行时组件（随 exe 分发）
 
@@ -13,12 +13,16 @@ ADOFAI GO 本体采用 **MIT** 许可证，全文见 [LICENSE](LICENSE)。
 | [shiboken6](https://pypi.org/project/shiboken6/) | 6.12.0 | LGPL-3.0-only | PySide6 的绑定运行时 |
 | Qt 6.12（随 PySide6 分发） | 6.12 | LGPL-3.0-only / GPL / 商业 | GUI、网络、WebEngine 等运行库 |
 | [Playwright](https://pypi.org/project/playwright/) | 1.65.2 | Apache-2.0 | 驱动本机浏览器完成 B 站 / TUF 操作 |
+| Node.js（Playwright driver 内置） | 26.13.1 | MIT（附其内置组件声明） | Playwright 驱动运行时 |
+| [greenlet](https://pypi.org/project/greenlet/) | 3.5.6 | MIT | Playwright 同步运行时 |
+| [typing_extensions](https://pypi.org/project/typing-extensions/) | 4.16.0 | PSF-2.0 | 类型标注兼容层 |
 | [requests](https://pypi.org/project/requests/) | 2.34.2 | Apache-2.0 | HTTP 请求 |
 | [urllib3](https://pypi.org/project/urllib3/) | 2.8.0 | MIT | requests 的传输层 |
 | [certifi](https://pypi.org/project/certifi/) | 2026.10.23 | MPL-2.0 | CA 根证书包 |
 | [charset-normalizer](https://pypi.org/project/charset-normalizer/) | 3.5.2 | MIT | 响应编码识别 |
 | [idna](https://pypi.org/project/idna/) | 3.20 | BSD-3-Clause | 国际化域名 |
 | Python 3.11 | 3.11 | PSF-2.0 | 打包版内嵌的 Python 运行时 |
+| OpenSSL / libffi / Mesa（随 Python 3.11、Qt 6.12 分发） | 随上游 | Apache-2.0 / MIT / MIT | TLS、ctypes 与软件 OpenGL（opengl32sw.dll） |
 | [PyInstaller](https://pypi.org/project/pyinstaller/) | 6.22.3 | GPL-2.0-or-later，附打包引导器例外 | 仅用于生成 exe，见下 |
 
 PyInstaller 的 GPL 只作用于其引导器（bootloader），其许可证附带例外，允许用它打包并分发非自由程序：
@@ -40,8 +44,14 @@ PyInstaller 的 GPL 只作用于其引导器（bootloader），其许可证附�
 | --- | --- | --- |
 | [LGPL-3.0.txt](licenses/LGPL-3.0.txt) | GNU Lesser General Public License v3 | PySide6、shiboken6、Qt 6.12 |
 | [GPL-3.0.txt](licenses/GPL-3.0.txt) | GNU General Public License v3 | LGPLv3 所引用的基础条款 |
-| [Apache-2.0.txt](licenses/Apache-2.0.txt) | Apache License 2.0 | Playwright、requests |
+| [Apache-2.0.txt](licenses/Apache-2.0.txt) | Apache License 2.0 | Playwright、requests、OpenSSL |
 | [requests-NOTICE.txt](licenses/requests-NOTICE.txt) | Apache-2.0 NOTICE | requests |
+| [playwright-NOTICE.txt](licenses/playwright-NOTICE.txt) | Apache-2.0 NOTICE | Playwright |
+| [playwright-ThirdPartyNotices.txt](licenses/playwright-ThirdPartyNotices.txt) | 第三方组件声明 | Playwright 内置 npm 组件 |
+| [node-LICENSE.txt](licenses/node-LICENSE.txt) | MIT（Node.js 及其内置组件声明） | Node.js（Playwright driver） |
+| [greenlet-LICENSE.txt](licenses/greenlet-LICENSE.txt) | MIT | greenlet |
+| [typing_extensions-LICENSE.txt](licenses/typing_extensions-LICENSE.txt) | PSF-2.0 | typing_extensions |
+| [PSF-2.0.txt](licenses/PSF-2.0.txt) | Python Software Foundation License 2.0 | Python 3.11、typing_extensions |
 | [urllib3-LICENSE.txt](licenses/urllib3-LICENSE.txt) | MIT | urllib3 |
 | [charset-normalizer-LICENSE.txt](licenses/charset-normalizer-LICENSE.txt) | MIT | charset-normalizer |
 | [idna-LICENSE.txt](licenses/idna-LICENSE.txt) | BSD-3-Clause | idna |
