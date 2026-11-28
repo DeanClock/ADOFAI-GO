@@ -1,0 +1,49 @@
+name: Tests
+
+# Windows 专用桌面应用：不要在 ubuntu runner 上跑。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一分支只保留最新一次运行，旧运行自动取消。
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (Windows / Python 3.11)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      ADOFAI_NO_AUTOLOGIN: '1'
+      PYTHONIOENCODING: utf-8
+      ADOFAI_TUF_HOME: ${{ runner.temp }}/tuf-home
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: 创建测试数据目录
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "$env:ADOFAI_TUF_HOME" | Out-Null
+
+      - name: 安装依赖
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: 运行测试
+        run: python -m pytest -q

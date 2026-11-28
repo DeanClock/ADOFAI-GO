@@ -186,7 +186,9 @@ dist\ADOFAI GO.exe --selftest
 
 - 不要提交 `browser_profile/`、`records.json`、`draft.json`、日志、`.env`、证书或密钥。
 - 截图和示例数据使用假账号、假 BV 号。
+- 推送与 PR 会由 [GitHub Actions](../.github/workflows/tests.yml) 在 `windows-latest` / Python 3.11 上自动跑 `python -m pytest -q`，合并前确认 CI 通过。
 - 运行 `python -m pytest -q`、`python -m pip_audit`、`python -m bandit -r adofai_publisher -ll`。
-- 依赖使用 `requirements.txt` / `requirements-dev.txt` 管理，发布前审查升级。
+- 依赖使用 `requirements.txt` / `requirements-dev.txt` 管理（v0.17.22 起为精确锁定版本），发布前审查升级。
+- 分发 zip 必须带 `THIRD_PARTY_NOTICES.md` 与 `licenses/` 目录，许可证全文不可省略；升级依赖时同步更新两者。
 - 发布的 exe 提供 SHA256；有条件时进行代码签名。
 - 阅读 [SECURITY.md](../SECURITY.md)。

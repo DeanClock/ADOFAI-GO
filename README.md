@@ -198,8 +198,9 @@ B 站网页投稿对大文件不友好，超过 8GB 时工具会提示。建议�
 | [开发指南](docs/DEVELOPMENT.md) | 仓库结构、测试、打包、自检与开源发布前检查 |
 | [更新日志](CHANGELOG.md) | 从 v0.4.0 到当前版本的全部更新记录 |
 | [安全策略](SECURITY.md) | 支持范围、漏洞报告方式与威胁模型 |
+| [第三方组件与许可](THIRD_PARTY_NOTICES.md) | 依赖版本、许可证清单、许可证全文位置与 PySide6 / Qt 的 LGPLv3 说明 |
 | [许可证](LICENSE) | MIT |
 
 - 所有历史、草稿、设置都在本机；工具不发送遥测，也不保存账号密码。
-- 本项目采用 **MIT** 许可证。PySide6 采用 LGPLv3 / GPLv3 / 商业许可三重授权，基于本项目打包 exe 分发时，需要自行确认 PySide6 的合规要求。
+- 本项目采用 **MIT** 许可证。PySide6 以 **LGPLv3** 使用（未修改、动态链接），其源码获取与替换 / 重新链接方式见[第三方组件与许可](THIRD_PARTY_NOTICES.md)。
 - 作者：**DeanClock**
