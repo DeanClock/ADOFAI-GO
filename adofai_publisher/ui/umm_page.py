@@ -145,6 +145,8 @@ class UmmPage(QWidget):
         dir_row = QHBoxLayout()
         self.dir_input = QLineEdit()
         self.dir_input.setPlaceholderText("留空则自动从 Steam 探测")
+        # 回填已保存的目录：页面构造后立即可用，不依赖 refresh() 或本机是否装了游戏。
+        self.dir_input.setText(str(self.settings.get("umm_game_dir") or ""))
         browse = QPushButton("选择目录")
         browse.clicked.connect(self._browse_dir)
         dir_row.addWidget(self.dir_input, 1)
