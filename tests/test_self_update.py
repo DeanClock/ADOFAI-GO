@@ -341,7 +341,9 @@ def test_build_install_script_has_backup_rollback_and_hash():
     assert "param(" in script
     assert "$TargetPath.old" in script
     assert "Copy-Item" in script
-    assert "Get-FileHash" in script
+    # 哈希用 .NET 算：部分 runner 的 PowerShell 没加载 Get-FileHash 命令。
+    assert "Get-Sha256Hex $TargetPath" in script
+    assert "System.Security.Cryptography.SHA256" in script
     assert "rollback completed" in script
     assert "Get-Process -Id $ParentPid" in script
 

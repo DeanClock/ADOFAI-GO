@@ -398,6 +398,23 @@ function Test-FileLocked([string]$path) {
     }
 }
 
+# 用 .NET 直接算 SHA256：部分机器（含 GitHub Actions runner）的
+# PowerShell 缺少 Get-FileHash 命令（模块未自动加载），不能用它。
+function Get-Sha256Hex([string]$path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($path)
+        try {
+            $bytes = $sha.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+    return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+}
+
 Write-UpdateLog "helper started; waiting for pid $ParentPid to exit"
 $deadline = (Get-Date).AddSeconds($WaitSeconds)
 $exited = $false
@@ -435,7 +452,7 @@ try {
     }
     Copy-Item -LiteralPath $NewPath -Destination $TargetPath -Force
     if ($ExpectedSha256 -ne "") {
-        $actual = (Get-FileHash -LiteralPath $TargetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actual = Get-Sha256Hex $TargetPath
         if ($actual -ne $ExpectedSha256.ToLowerInvariant()) {
             throw "sha256 mismatch after copy"
         }
