@@ -7,7 +7,7 @@
 给《冰与火之舞》（A Dance of Fire and Ice）UP 主用的本地投稿工作台：
 录完视频只填一次信息，工具负责生成 B 站文案、上传 B 站、抓取 BV 号，再把通关记录提交到 TUF 论坛。
 
-**v0.17.24 Beta** · Windows 10/11 · Python 3.11+ / PySide6 · MIT
+**v0.17.25 Beta** · Windows 10/11 · Python 3.11+ / PySide6 · MIT
 
 [**下载最新版**](https://github.com/DeanClock/ADOFAI-GO/releases/latest) ·
 [快速开始](#quickstart) ·
@@ -95,7 +95,7 @@
 
 ### 普通用户
 
-1. **下载并运行**：到 [Releases](https://github.com/DeanClock/ADOFAI-GO/releases/latest) 下载最新 `exe`，双击即可。便携版首次启动会在 exe 同目录生成 `ADOFAI GO 数据\`；升级时先完全退出旧版，再用新 exe 覆盖，登录态、谱面库、草稿都会保留。
+1. **下载并运行**：到 [Releases](https://github.com/DeanClock/ADOFAI-GO/releases/latest) 下载最新 `exe`，双击即可；默认把设置与数据放在 `%APPDATA%\AdofaiTufBridge\`。想做成便携版，就在 exe 同目录放一个 `portable.txt`（桌面分发 zip 里已自带），数据会改放 exe 同目录的 `ADOFAI GO 数据\`。升级时先完全退出旧版，再用新 exe 覆盖，登录态、谱面库、草稿都会保留。
 2. **首次登录**：打开「06 设置 → 工具与账号」，点「打开浏览器登录双站」，在弹出的窗口里分别登录 B 站和 TUF，两个站点都登录后自动结束等待。工具不保存账号密码。
 3. **开始投稿**：把视频拖进「01 工作台」，按五步填完信息；第 5 步点「上传到 B 站」，拿到 BV 号后点「提交 TUF 记录」。这次投稿会写入「03 历史」。
 
