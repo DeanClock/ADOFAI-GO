@@ -49,4 +49,4 @@ jobs:
       - name: 运行测试
         env:
           ADOFAI_TUF_HOME: ${{ runner.temp }}/tuf-home
-        run: python -m pytest -q
+        run: python -m pytest -q --timeout=120 --timeout-method=thread --durations=20
