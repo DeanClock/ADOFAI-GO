@@ -1118,6 +1118,9 @@ class CopyPreview(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._last_draft: Draft | None = None
+        self._rendering_cover = False
+        self._cover_cache_path = ""
+        self._cover_cache_pixmap: QPixmap | None = None
         columns = QHBoxLayout(self)
         columns.setContentsMargins(0, 0, 0, 0)
         columns.setSpacing(18)
@@ -1139,6 +1142,11 @@ class CopyPreview(QWidget):
         self.cover_image.setObjectName("CoverPreview")
         self.cover_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover_image.setMinimumHeight(190)
+        # 与 CoverPicker 同理：忽略 pixmap 的 sizeHint，避免 resize → 重新
+        # setPixmap → 撑大布局 → 再 resize 的正反馈。
+        self.cover_image.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        )
         self._apply_cover_style()
         cover_layout.addWidget(self.cover_image)
         shell_layout.addWidget(cover)
@@ -1237,24 +1245,39 @@ class CopyPreview(QWidget):
         self.tuf_values["bvid"].setText(draft.bvid or "待获取")
 
     def _render_cover(self, draft: Draft) -> None:
-        cover_path = Path(draft.cover_path) if draft.cover_path else None
-        cover_pixmap = QPixmap(str(cover_path)) if cover_path and cover_path.is_file() else QPixmap()
-        if not cover_pixmap.isNull():
-            target_w = max(320, self.cover_image.width())
-            target_h = max(190, self.cover_image.height())
-            scaled = cover_pixmap.scaled(
-                target_w,
-                target_h,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            x = max(0, (scaled.width() - target_w) // 2)
-            y = max(0, (scaled.height() - target_h) // 2)
-            self.cover_image.setPixmap(scaled.copy(x, y, target_w, target_h))
-            self.cover_image.setText("")
-        else:
-            self.cover_image.setPixmap(QPixmap())
-            self.cover_image.setText("ADOFAI\nA Dance of Fire and Ice")
+        # 与 CoverPicker 同理：resizeEvent 里 setPixmap 会再触发布局，重入直接返回。
+        if self._rendering_cover:
+            return
+        self._rendering_cover = True
+        try:
+            cover_path = str(draft.cover_path or "")
+            # 同一路径只解码一次；窗口拖动时 resizeEvent 很密集，读盘解码很贵。
+            if cover_path != self._cover_cache_path or self._cover_cache_pixmap is None:
+                self._cover_cache_path = cover_path
+                self._cover_cache_pixmap = (
+                    QPixmap(cover_path)
+                    if cover_path and Path(cover_path).is_file()
+                    else QPixmap()
+                )
+            cover_pixmap = self._cover_cache_pixmap
+            if not cover_pixmap.isNull():
+                target_w = max(320, self.cover_image.width())
+                target_h = max(190, self.cover_image.height())
+                scaled = cover_pixmap.scaled(
+                    target_w,
+                    target_h,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                x = max(0, (scaled.width() - target_w) // 2)
+                y = max(0, (scaled.height() - target_h) // 2)
+                self.cover_image.setPixmap(scaled.copy(x, y, target_w, target_h))
+                self.cover_image.setText("")
+            else:
+                self.cover_image.setPixmap(QPixmap())
+                self.cover_image.setText("ADOFAI\nA Dance of Fire and Ice")
+        finally:
+            self._rendering_cover = False
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)

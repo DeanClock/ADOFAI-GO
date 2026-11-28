@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListView,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QTabBar,
@@ -623,6 +624,69 @@ def test_cover_picker_preview_shows_whole_image_without_cropping(app, tmp_path):
     finally:
         picker.close()
         picker.deleteLater()
+        app.processEvents()
+
+
+def test_cover_picker_resize_does_not_grow_through_pixmap_sizehint(app, tmp_path):
+    """回归：重启后选片页遇到 16:9 主图会一路递归到爆栈（异常码 0xc00000fd）。
+
+    旧实现里 resizeEvent → _render → setPixmap 让 QLabel 的 sizeHint 跟着
+    pixmap 变大，布局再变宽、再触发 resizeEvent，正反馈到 Qt6Gui 栈溢出。
+    预览标签必须忽略 pixmap 的 sizeHint，并且反复布局后尺寸必须收敛。
+    """
+    primary = _make_image(tmp_path / "wide169.png", 1920, 1080)
+    picker = CoverPicker()
+    picker.resize(600, 520)
+    picker.show()
+    app.processEvents()
+    try:
+        picker.set_file(primary)
+        app.processEvents()
+        policy = picker.preview.sizePolicy()
+        assert policy.horizontalPolicy() == QSizePolicy.Policy.Ignored
+        assert policy.verticalPolicy() == QSizePolicy.Policy.Ignored
+        snapshots = []
+        for _ in range(6):
+            app.processEvents()
+            hint = picker.minimumSizeHint()
+            snapshots.append((picker.width(), picker.height(), hint.width(), hint.height()))
+        assert len(set(snapshots)) == 1, f"预览尺寸在反复布局中未收敛: {snapshots}"
+        shown = picker.preview.pixmap()
+        assert not shown.isNull()
+        assert shown.width() <= picker.preview.width()
+        # 图片只解码一次并缓存，resize 不再读盘。
+        assert picker._slot_image() is picker._images[CoverPicker.SLOT_PRIMARY]
+    finally:
+        picker.close()
+        picker.deleteLater()
+        app.processEvents()
+
+
+def test_copy_preview_cover_label_ignores_pixmap_sizehint(app, tmp_path):
+    """工作台第 4 步的封面预览同样不能把 pixmap 的 sizeHint 反馈给布局。"""
+    from adofai_publisher.models import Draft
+    from adofai_publisher.ui.pages import CopyPreview
+
+    wide = _make_image(tmp_path / "wide.png", 1600, 900)
+    preview = CopyPreview()
+    preview.resize(880, 620)
+    preview.show()
+    app.processEvents()
+    try:
+        draft = Draft()
+        draft.cover_path = wide
+        preview.refresh(draft)
+        assert preview.cover_image.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+        assert not preview.cover_image.pixmap().isNull()
+        hints = []
+        for _ in range(6):
+            app.processEvents()
+            hints.append(preview.minimumSizeHint())
+        # 布局稳定后连续三轮不再变化；旧实现会一轮比一轮大（正反馈）。
+        assert hints[-1] == hints[-2] == hints[-3], hints
+    finally:
+        preview.close()
+        preview.deleteLater()
         app.processEvents()
 
 

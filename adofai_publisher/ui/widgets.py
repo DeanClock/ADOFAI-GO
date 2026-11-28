@@ -593,8 +593,12 @@ class CoverPicker(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._slot = self.SLOT_PRIMARY
         self._paths = {self.SLOT_PRIMARY: "", self.SLOT_ALTERNATE: ""}
+        # 解码结果按槽缓存：resizeEvent 会频繁触发 _render，不能每次都读盘解码。
+        self._images = {self.SLOT_PRIMARY: QImage(), self.SLOT_ALTERNATE: QImage()}
         self._sync_image = QImage()
         self._sync_callback: Callable[[str, QImage], None] | None = None
+        # resizeEvent → setPixmap 会再次触发布局；重入直接返回，避免无限递归。
+        self._rendering = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
@@ -622,6 +626,11 @@ class CoverPicker(QFrame):
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumHeight(self.PREVIEW_MIN_HEIGHT)
         self.preview.setWordWrap(True)
+        # 关键：忽略 pixmap 的 sizeHint。否则大图会把 QLabel 撑大，布局再次
+        # resize，_render 又按更大的尺寸缩放……正反馈一直到爆栈。
+        self.preview.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
+        )
         self.hint = QLabel(self.SLOT_HINTS[self._slot])
         self.hint.setObjectName("DropHint")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -707,6 +716,7 @@ class CoverPicker(QFrame):
         image = QImage(path)
         if image.isNull():
             self._paths[self._slot] = ""
+            self._images[self._slot] = QImage()
             if self._slot == self.SLOT_PRIMARY:
                 self._update_sync()
             self._refresh_slot_buttons()
@@ -715,6 +725,7 @@ class CoverPicker(QFrame):
             self.hint.setText("请选择 JPG / PNG / WEBP 图片")
             return
         self._paths[self._slot] = path
+        self._images[self._slot] = image
         if self._slot == self.SLOT_PRIMARY:
             self._update_sync()
         self._refresh_slot_buttons()
@@ -723,6 +734,7 @@ class CoverPicker(QFrame):
 
     def clear(self) -> None:
         self._paths[self._slot] = ""
+        self._images[self._slot] = QImage()
         if self._slot == self.SLOT_PRIMARY:
             self._update_sync()
         self._refresh_slot_buttons()
@@ -730,8 +742,7 @@ class CoverPicker(QFrame):
         self.fileSelected.emit("")
 
     def _update_sync(self) -> None:
-        source = self._paths[self.SLOT_PRIMARY]
-        image = QImage(source) if source else QImage()
+        image = self._images[self.SLOT_PRIMARY]
         self._sync_image = (
             self.center_crop(image, self.SLOT_RATIOS[self.SLOT_ALTERNATE])
             if not image.isNull()
@@ -765,11 +776,8 @@ class CoverPicker(QFrame):
 
     def _slot_image(self) -> QImage:
         """当前槽自己的图片；没有就是空图，不拿另一槽的图顶替预览。"""
-        path = self._paths[self._slot]
-        if not path:
-            return QImage()
-        image = QImage(path)
-        return QImage() if image.isNull() else image
+        image = self._images.get(self._slot)
+        return QImage() if image is None else image
 
     def _placeholder_text(self) -> str:
         if self._slot == self.SLOT_ALTERNATE:
@@ -802,25 +810,33 @@ class CoverPicker(QFrame):
             self.preview.setMinimumHeight(target.height())
 
     def _render(self) -> None:
-        self._apply_preview_height()
-        image = self._slot_image()
-        if image.isNull():
-            self.preview.setPixmap(QPixmap())
-            self.preview.setText(self._placeholder_text())
+        # setPixmap / setMinimumHeight 会同步触发布局与新的 resizeEvent；
+        # 重入时直接返回，避免 resizeEvent → _render → 布局 → resizeEvent 递归。
+        if self._rendering:
+            return
+        self._rendering = True
+        try:
+            self._apply_preview_height()
+            image = self._slot_image()
+            if image.isNull():
+                self.preview.setPixmap(QPixmap())
+                self.preview.setText(self._placeholder_text())
+                self.hint.setText(self._hint_text())
+                return
+            size = self._preview_target_size()
+            if size.isEmpty():
+                return
+            # 完整显示整张图，不居中裁剪：预览框按 4:3 撑开，图片等比缩放进去。
+            scaled = image.scaled(
+                size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.preview.setPixmap(QPixmap.fromImage(scaled))
+            self.preview.setText("")
             self.hint.setText(self._hint_text())
-            return
-        size = self._preview_target_size()
-        if size.isEmpty():
-            return
-        # 完整显示整张图，不居中裁剪：预览框按 4:3 撑开，图片等比缩放进去。
-        scaled = image.scaled(
-            size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.preview.setPixmap(QPixmap.fromImage(scaled))
-        self.preview.setText("")
-        self.hint.setText(self._hint_text())
+        finally:
+            self._rendering = False
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
